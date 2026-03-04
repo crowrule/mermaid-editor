@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import DiagramCanvas from './DiagramCanvas.vue'
 
 const props = defineProps({
@@ -16,6 +16,18 @@ const emit = defineEmits([
 const mode = ref('add')
 const selectedNodeType = ref('process')
 const selectedEdgeType = ref('arrow')
+
+// ── narrow toolbar detection ──────────────────────────────────────────────────
+const toolbarRef = ref(null)
+const isNarrow = ref(false)
+let ro = null
+onMounted(() => {
+  ro = new ResizeObserver(([entry]) => {
+    isNarrow.value = entry.contentRect.width < 640
+  })
+  if (toolbarRef.value) ro.observe(toolbarRef.value)
+})
+onUnmounted(() => ro?.disconnect())
 
 // ── toolbar config per diagram type ──────────────────────────────────────────
 const toolbarConfig = computed(() => {
@@ -59,10 +71,14 @@ const toolbarConfig = computed(() => {
     default: // flowchart
       return {
         nodeTypes: [
-          { type: 'process',  label: '☐ Process' },
-          { type: 'decision', label: '◇ Decision' },
-          { type: 'terminal', label: '⬭ Terminal' },
-          { type: 'io',       label: '/ IO /' },
+          { type: 'process',      label: '☐ Process' },
+          { type: 'decision',     label: '◇ Decision' },
+          { type: 'terminal',     label: '⬭ Terminal' },
+          { type: 'io',           label: '/ IO /' },
+          { type: 'database',     label: '🗄 Database' },
+          { type: 'multiprocess', label: '⧉ Multi' },
+          { type: 'subprocess',   label: '▣ Sub' },
+          { type: 'reference',    label: '○ Ref' },
         ],
         edgeTypes: [
           { type: 'arrow',  label: '→ Arrow' },
@@ -113,9 +129,12 @@ function edgeTypeClass(t) {
 <template>
   <div class="flex flex-col h-full">
     <!-- ── toolbar ── -->
-    <div class="flex flex-wrap items-center gap-1.5 px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
-      <!-- node type buttons -->
-      <div class="flex gap-1">
+    <div
+      ref="toolbarRef"
+      class="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0"
+    >
+      <!-- Row 1: node type buttons (always) -->
+      <div class="flex flex-wrap gap-1">
         <button
           v-for="nt in toolbarConfig.nodeTypes"
           :key="nt.type"
@@ -124,35 +143,38 @@ function edgeTypeClass(t) {
         >{{ nt.label }}</button>
       </div>
 
-      <div class="w-px h-5 bg-gray-600 mx-1" />
+      <!-- Row 2: edge types + mode buttons (wraps to new line when narrow) -->
+      <div :class="['flex flex-wrap items-center gap-1.5', isNarrow ? 'w-full' : '']">
+        <div v-if="!isNarrow" class="w-px h-5 bg-gray-600" />
 
-      <!-- edge type buttons -->
-      <div class="flex gap-1">
-        <button
-          v-for="et in toolbarConfig.edgeTypes"
-          :key="et.type"
-          :class="['px-2.5 py-1 text-xs rounded transition-colors', edgeTypeClass(et.type)]"
-          @click="selectedEdgeType = et.type"
-        >{{ et.label }}</button>
+        <!-- edge type buttons -->
+        <div class="flex gap-1">
+          <button
+            v-for="et in toolbarConfig.edgeTypes"
+            :key="et.type"
+            :class="['px-2.5 py-1 text-xs rounded transition-colors', edgeTypeClass(et.type)]"
+            @click="selectedEdgeType = et.type"
+          >{{ et.label }}</button>
+        </div>
+
+        <div class="w-px h-5 bg-gray-600" />
+
+        <!-- mode buttons -->
+        <div class="flex gap-1">
+          <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('add')]"     @click="mode = 'add'">+ Add</button>
+          <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('select')]"  @click="mode = 'select'">↖ Select</button>
+          <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('connect')]" @click="mode = 'connect'">⇢ Connect</button>
+          <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('delete')]"  @click="mode = 'delete'">✕ Delete</button>
+        </div>
+
+        <!-- hint -->
+        <span class="ml-auto text-xs text-gray-500 whitespace-nowrap">
+          <template v-if="mode === 'add'">클릭해서 노드 배치</template>
+          <template v-else-if="mode === 'connect'">출발 → 도착 노드 순서로 클릭</template>
+          <template v-else-if="mode === 'delete'">클릭해서 삭제 · Del 키</template>
+          <template v-else>드래그로 이동 · 더블클릭 이름 변경 · Del 키</template>
+        </span>
       </div>
-
-      <div class="w-px h-5 bg-gray-600 mx-1" />
-
-      <!-- mode buttons -->
-      <div class="flex gap-1">
-        <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('add')]"    @click="mode = 'add'">+ Add</button>
-        <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('select')]" @click="mode = 'select'">↖ Select</button>
-        <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('connect')]"@click="mode = 'connect'">⇢ Connect</button>
-        <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('delete')]" @click="mode = 'delete'">✕ Delete</button>
-      </div>
-
-      <!-- hint -->
-      <span class="ml-auto text-xs text-gray-500">
-        <template v-if="mode === 'add'">Click canvas to place node</template>
-        <template v-else-if="mode === 'connect'">Click source node, then target node</template>
-        <template v-else-if="mode === 'delete'">Click node or edge to delete · Del key</template>
-        <template v-else>Drag to move · Dbl-click to rename · Del key</template>
-      </span>
     </div>
 
     <!-- ── canvas ── -->

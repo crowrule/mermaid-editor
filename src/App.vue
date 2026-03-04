@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { generateCode } from './components/codeGenerator.js'
 import VisualEditor from './components/VisualEditor.vue'
 import DiagramPreview from './components/DiagramPreview.vue'
@@ -15,6 +15,63 @@ const previewRef = ref(null)
 
 let nodeIdCounter = 1
 let edgeIdCounter = 1
+
+// ── resizable divider ──────────────────────────────────────────────────────────
+const leftPct = ref(60)
+const isResizing = ref(false)
+const mainRef = ref(null)
+
+// Minimum panel widths captured at drag start
+let minRightPx = 200
+let minLeftPx  = 200
+
+function computeMinLeftPx() {
+  if (nodes.value.length === 0) return 200
+  let maxRight
+  if (diagramType.value === 'sequence') {
+    // Canvas constants: SEQ_OFFSET_X=100, SEQ_PARTICIPANT_SPACING=160, NODE_W/2=60
+    maxRight = 100 + (nodes.value.length - 1) * 160 + 60
+  } else {
+    // NODE_W/2 = 60 — rightmost edge of the widest node
+    maxRight = Math.max(...nodes.value.map(n => (n.x || 0) + 60))
+  }
+  return Math.max(maxRight + 48, 200) // 48px breathing room
+}
+
+function onDividerMousedown(e) {
+  isResizing.value = true
+  e.preventDefault()
+  // Right minimum: mermaid sets style.maxWidth on the SVG to its natural render width
+  const svgEl = previewRef.value?.containerRef?.querySelector('svg')
+  if (svgEl) {
+    const naturalW = parseFloat(svgEl.style.maxWidth) || svgEl.getBoundingClientRect().width
+    minRightPx = Math.max(naturalW + 48, 200)
+  } else {
+    minRightPx = 200
+  }
+  // Left minimum: rightmost node extent + margin
+  minLeftPx = computeMinLeftPx()
+}
+function onGlobalMousemove(e) {
+  if (!isResizing.value || !mainRef.value) return
+  const rect = mainRef.value.getBoundingClientRect()
+  const DIVIDER_W = 6
+  const minLeftPct  = (minLeftPx  / rect.width) * 100
+  const maxLeftPct  = ((rect.width - minRightPx - DIVIDER_W) / rect.width) * 100
+  const pct = ((e.clientX - rect.left) / rect.width) * 100
+  leftPct.value = Math.min(Math.max(pct, Math.max(minLeftPct, 20)), Math.max(maxLeftPct, 20))
+}
+function onGlobalMouseup() {
+  isResizing.value = false
+}
+onMounted(() => {
+  window.addEventListener('mousemove', onGlobalMousemove)
+  window.addEventListener('mouseup', onGlobalMouseup)
+})
+onUnmounted(() => {
+  window.removeEventListener('mousemove', onGlobalMousemove)
+  window.removeEventListener('mouseup', onGlobalMouseup)
+})
 
 // Auto-generate mermaid code whenever visual state changes
 watch([diagramType, nodes, edges], () => {
@@ -32,6 +89,7 @@ watch(diagramType, () => {
 // ── default label per type ────────────────────────────────────────────────────
 const DEFAULT_LABELS = {
   process: 'Process', decision: 'Decision', terminal: 'Terminal', io: 'IO',
+  database: 'Database', multiprocess: 'Multi', subprocess: 'Sub', reference: 'Ref',
   participant: 'Participant', actor: 'Actor',
   entity: 'Entity', class: 'Class',
 }
@@ -110,11 +168,15 @@ function handleCodeChange(code) {
     </header>
 
     <!-- ── main split ── -->
-    <main class="flex flex-1 overflow-hidden">
-      <!-- Left 60%: Visual Editor -->
+    <main
+      ref="mainRef"
+      class="flex flex-1 overflow-hidden"
+      :style="isResizing ? 'cursor:col-resize;user-select:none' : ''"
+    >
+      <!-- Left: Visual Editor -->
       <VisualEditor
-        class="border-r border-gray-700"
-        style="width: 60%;"
+        class="shrink-0 min-w-0"
+        :style="{ width: leftPct + '%' }"
         :diagram-type="diagramType"
         :nodes="nodes"
         :edges="edges"
@@ -126,8 +188,15 @@ function handleCodeChange(code) {
         @update-label="handleUpdateLabel"
       />
 
-      <!-- Right 40%: Preview / Code tabs -->
-      <div class="flex flex-col overflow-hidden" style="width: 40%;">
+      <!-- Draggable divider -->
+      <div
+        class="w-1.5 shrink-0 cursor-col-resize transition-colors"
+        :class="isResizing ? 'bg-indigo-500' : 'bg-gray-700 hover:bg-indigo-500'"
+        @mousedown="onDividerMousedown"
+      />
+
+      <!-- Right: Preview / Code tabs -->
+      <div class="flex flex-col flex-1 min-w-0 overflow-hidden">
         <!-- tab bar -->
         <div class="flex bg-gray-800 border-b border-gray-700 shrink-0">
           <button

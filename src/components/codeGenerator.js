@@ -27,6 +27,18 @@ function generateFlowchart(nodes, edges) {
       case 'io':
         lines.push(`  ${id}[/${label}/]`)
         break
+      case 'database':
+        lines.push(`  ${id}[(${label})]`)
+        break
+      case 'subprocess':
+        lines.push(`  ${id}[[${label}]]`)
+        break
+      case 'multiprocess':
+        lines.push(`  ${id}@{ shape: procs, label: "${label}" }`)
+        break
+      case 'reference':
+        lines.push(`  ${id}((${label}))`)
+        break
       default: // process
         lines.push(`  ${id}[${label}]`)
     }

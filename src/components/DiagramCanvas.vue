@@ -83,17 +83,26 @@ function parallelogramPoints(cx, cy) {
 
 // ── color per type ────────────────────────────────────────────────────────────
 const NODE_COLORS = {
-  process:     { fill: '#1e3a5f', stroke: '#4a90d9' },
-  decision:    { fill: '#3b2a1a', stroke: '#d97706' },
-  terminal:    { fill: '#1a3a2a', stroke: '#34d399' },
-  io:          { fill: '#2a1a3a', stroke: '#a78bfa' },
-  participant: { fill: '#1e3a5f', stroke: '#60a5fa' },
-  actor:       { fill: '#2a1a2a', stroke: '#f472b6' },
-  entity:      { fill: '#1a3a3a', stroke: '#2dd4bf' },
-  class:       { fill: '#1e2a3a', stroke: '#818cf8' },
+  process:      { fill: '#1e3a5f', stroke: '#4a90d9' },
+  decision:     { fill: '#3b2a1a', stroke: '#d97706' },
+  terminal:     { fill: '#1a3a2a', stroke: '#34d399' },
+  io:           { fill: '#2a1a3a', stroke: '#a78bfa' },
+  database:     { fill: '#0f2233', stroke: '#38bdf8' },
+  multiprocess: { fill: '#2a1a0f', stroke: '#fb923c' },
+  subprocess:   { fill: '#1a2a1a', stroke: '#86efac' },
+  reference:    { fill: '#2a2a0f', stroke: '#facc15' },
+  participant:  { fill: '#1e3a5f', stroke: '#60a5fa' },
+  actor:        { fill: '#2a1a2a', stroke: '#f472b6' },
+  entity:       { fill: '#1a3a3a', stroke: '#2dd4bf' },
+  class:        { fill: '#1e2a3a', stroke: '#818cf8' },
 }
 function nodeColor(type) {
   return NODE_COLORS[type] || { fill: '#1e3a5f', stroke: '#4a90d9' }
+}
+function strokeColor(node) {
+  if (selectedId.value === node.id) return '#f59e0b'
+  if (connectSource.value?.id === node.id) return '#10b981'
+  return nodeColor(node.type).stroke
 }
 
 // ── edge path helpers ─────────────────────────────────────────────────────────
@@ -302,20 +311,19 @@ function onKeyDown(e) {
       @mousedown.stop="onNodeDown($event, node)"
       @dblclick.stop="startEdit(node)"
     >
-      <!-- process / participant / entity / class → rect -->
-      <template v-if="['process','participant','entity','class'].includes(node.type) || !['decision','terminal','io','actor'].includes(node.type)">
+      <!-- process / participant / entity / class → plain rect -->
+      <template v-if="['process','participant','entity','class'].includes(node.type)">
         <rect
           :x="effectiveX(node) - NODE_W / 2"
           :y="effectiveY(node) - NODE_H / 2"
           :width="NODE_W" :height="NODE_H"
-          :rx="0"
           :fill="nodeColor(node.type).fill"
-          :stroke="selectedId === node.id ? '#f59e0b' : connectSource && connectSource.id === node.id ? '#10b981' : nodeColor(node.type).stroke"
+          :stroke="strokeColor(node)"
           stroke-width="2"
         />
       </template>
 
-      <!-- terminal → rounded rect -->
+      <!-- terminal → stadium (rounded rect) -->
       <template v-if="node.type === 'terminal'">
         <rect
           :x="effectiveX(node) - NODE_W / 2"
@@ -323,38 +331,117 @@ function onKeyDown(e) {
           :width="NODE_W" :height="NODE_H"
           rx="24"
           :fill="nodeColor(node.type).fill"
-          :stroke="selectedId === node.id ? '#f59e0b' : connectSource && connectSource.id === node.id ? '#10b981' : nodeColor(node.type).stroke"
+          :stroke="strokeColor(node)"
           stroke-width="2"
         />
       </template>
 
-      <!-- decision → diamond polygon -->
+      <!-- decision → diamond -->
       <template v-if="node.type === 'decision'">
         <polygon
           :points="diamondPoints(effectiveX(node), effectiveY(node))"
           :fill="nodeColor(node.type).fill"
-          :stroke="selectedId === node.id ? '#f59e0b' : connectSource && connectSource.id === node.id ? '#10b981' : nodeColor(node.type).stroke"
+          :stroke="strokeColor(node)"
           stroke-width="2"
         />
       </template>
 
-      <!-- io → parallelogram polygon -->
+      <!-- io → parallelogram -->
       <template v-if="node.type === 'io'">
         <polygon
           :points="parallelogramPoints(effectiveX(node), effectiveY(node))"
           :fill="nodeColor(node.type).fill"
-          :stroke="selectedId === node.id ? '#f59e0b' : connectSource && connectSource.id === node.id ? '#10b981' : nodeColor(node.type).stroke"
+          :stroke="strokeColor(node)"
           stroke-width="2"
         />
       </template>
 
-      <!-- actor → stick figure (simple circle + lines) -->
+      <!-- database → cylinder (ellipse + rect + ellipse) -->
+      <template v-if="node.type === 'database'">
+        <rect
+          :x="effectiveX(node) - NODE_W / 2"
+          :y="effectiveY(node) - NODE_H / 2 + 10"
+          :width="NODE_W" :height="NODE_H - 20"
+          :fill="nodeColor(node.type).fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+        <ellipse
+          :cx="effectiveX(node)" :cy="effectiveY(node) + NODE_H / 2 - 10"
+          :rx="NODE_W / 2" ry="10"
+          :fill="nodeColor(node.type).fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+        <ellipse
+          :cx="effectiveX(node)" :cy="effectiveY(node) - NODE_H / 2 + 10"
+          :rx="NODE_W / 2" ry="10"
+          :fill="nodeColor(node.type).fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+      </template>
+
+      <!-- multiprocess → stacked rects -->
+      <template v-if="node.type === 'multiprocess'">
+        <rect
+          :x="effectiveX(node) - NODE_W / 2 + 8"
+          :y="effectiveY(node) - NODE_H / 2 - 6"
+          :width="NODE_W" :height="NODE_H"
+          :fill="nodeColor(node.type).fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+        <rect
+          :x="effectiveX(node) - NODE_W / 2"
+          :y="effectiveY(node) - NODE_H / 2"
+          :width="NODE_W" :height="NODE_H"
+          :fill="nodeColor(node.type).fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+      </template>
+
+      <!-- subprocess → rect with inner vertical lines (subroutine) -->
+      <template v-if="node.type === 'subprocess'">
+        <rect
+          :x="effectiveX(node) - NODE_W / 2"
+          :y="effectiveY(node) - NODE_H / 2"
+          :width="NODE_W" :height="NODE_H"
+          :fill="nodeColor(node.type).fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+        <line
+          :x1="effectiveX(node) - NODE_W / 2 + 10" :y1="effectiveY(node) - NODE_H / 2"
+          :x2="effectiveX(node) - NODE_W / 2 + 10" :y2="effectiveY(node) + NODE_H / 2"
+          :stroke="strokeColor(node)" stroke-width="1.5"
+        />
+        <line
+          :x1="effectiveX(node) + NODE_W / 2 - 10" :y1="effectiveY(node) - NODE_H / 2"
+          :x2="effectiveX(node) + NODE_W / 2 - 10" :y2="effectiveY(node) + NODE_H / 2"
+          :stroke="strokeColor(node)" stroke-width="1.5"
+        />
+      </template>
+
+      <!-- reference → circle -->
+      <template v-if="node.type === 'reference'">
+        <circle
+          :cx="effectiveX(node)" :cy="effectiveY(node)"
+          :r="NODE_H / 2"
+          :fill="nodeColor(node.type).fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+      </template>
+
+      <!-- actor → stick figure -->
       <template v-if="node.type === 'actor'">
         <circle
           :cx="effectiveX(node)" :cy="effectiveY(node) - 16"
           r="10"
           :fill="nodeColor(node.type).fill"
-          :stroke="selectedId === node.id ? '#f59e0b' : connectSource && connectSource.id === node.id ? '#10b981' : nodeColor(node.type).stroke"
+          :stroke="strokeColor(node)"
           stroke-width="2"
         />
         <line
