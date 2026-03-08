@@ -13,6 +13,28 @@ const diagramCode = ref('')
 const rightTab = ref('preview')
 const previewRef = ref(null)
 
+// ── diagram type change confirmation ──────────────────────────────────────────
+const pendingDiagramType = ref(null)
+
+function handleDiagramTypeChange(e) {
+  const newType = e.target.value
+  if (newType === diagramType.value) return
+  if (nodes.value.length > 0) {
+    pendingDiagramType.value = newType
+  } else {
+    diagramType.value = newType
+  }
+}
+
+function confirmDiagramTypeChange() {
+  diagramType.value = pendingDiagramType.value
+  pendingDiagramType.value = null
+}
+
+function cancelDiagramTypeChange() {
+  pendingDiagramType.value = null
+}
+
 let nodeIdCounter = 1
 let edgeIdCounter = 1
 
@@ -155,7 +177,8 @@ function handleCodeChange(code) {
       <h1 class="text-xl font-bold text-indigo-400 tracking-wide">Mermaid Editor</h1>
 
       <select
-        v-model="diagramType"
+        :value="diagramType"
+        @change="handleDiagramTypeChange"
         class="px-3 py-1.5 bg-gray-700 border border-gray-600 rounded text-sm text-gray-200 focus:outline-none focus:border-indigo-400 cursor-pointer"
       >
         <option value="flowchart">Flowchart</option>
@@ -234,5 +257,43 @@ function handleCodeChange(code) {
         />
       </div>
     </main>
+
+    <!-- ── diagram type change confirmation modal ── -->
+    <Transition name="fade">
+      <div
+        v-if="pendingDiagramType"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+        @click.self="cancelDiagramTypeChange"
+      >
+        <div class="bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 p-6 flex flex-col gap-4">
+          <h2 class="text-base font-semibold text-gray-100">다이어그램 종류 변경</h2>
+          <p class="text-sm text-gray-400 leading-relaxed">
+            현재 캔버스에 그려진 내용이 모두 삭제됩니다.<br>
+            계속 하시겠습니까?
+          </p>
+          <div class="flex justify-end gap-2">
+            <button
+              @click="cancelDiagramTypeChange"
+              class="px-4 py-1.5 text-sm rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+            >취소</button>
+            <button
+              @click="confirmDiagramTypeChange"
+              class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
+            >확인</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
   </div>
 </template>
+
+<style scoped>
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+</style>
