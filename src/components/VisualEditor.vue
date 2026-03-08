@@ -4,6 +4,7 @@ import DiagramCanvas from './DiagramCanvas.vue'
 
 const props = defineProps({
   diagramType: { type: String, required: true },
+  flowchartDirection: { type: String, default: 'TD' },
   nodes: { type: Array, required: true },
   edges: { type: Array, required: true },
 })
@@ -11,6 +12,7 @@ const props = defineProps({
 const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
   'delete-node', 'delete-edge', 'update-label',
+  'update:flowchartDirection',
 ])
 
 const mode = ref('add')
@@ -124,6 +126,11 @@ function edgeTypeClass(t) {
     ? 'bg-indigo-700 text-white'
     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
 }
+function directionClass(d) {
+  return props.flowchartDirection === d
+    ? 'bg-indigo-600 text-white'
+    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+}
 </script>
 
 <template>
@@ -133,7 +140,7 @@ function edgeTypeClass(t) {
       ref="toolbarRef"
       class="flex flex-wrap items-center gap-x-1.5 gap-y-1.5 px-3 py-2 bg-gray-800 border-b border-gray-700 shrink-0"
     >
-      <!-- Row 1: node type buttons (always) -->
+      <!-- Row 1: node type buttons + flowchart direction -->
       <div class="flex flex-wrap gap-1">
         <button
           v-for="nt in toolbarConfig.nodeTypes"
@@ -141,6 +148,19 @@ function edgeTypeClass(t) {
           :class="['px-2.5 py-1 text-xs rounded transition-colors', nodeTypeClass(nt.type)]"
           @click="selectedNodeType = nt.type"
         >{{ nt.label }}</button>
+
+        <!-- direction toggle (flowchart only) -->
+        <template v-if="diagramType === 'flowchart'">
+          <div class="w-px h-5 self-center bg-gray-600" />
+          <button
+            :class="['px-2.5 py-1 text-xs rounded transition-colors', directionClass('TD')]"
+            @click="emit('update:flowchartDirection', 'TD')"
+          >↓ TD</button>
+          <button
+            :class="['px-2.5 py-1 text-xs rounded transition-colors', directionClass('LR')]"
+            @click="emit('update:flowchartDirection', 'LR')"
+          >→ LR</button>
+        </template>
       </div>
 
       <!-- Row 2: edge types + mode buttons (wraps to new line when narrow) -->

@@ -9,9 +9,10 @@ function indexToLetter(i) {
   return result
 }
 
-function generateFlowchart(nodes, edges) {
-  if (nodes.length === 0) return 'flowchart TD'
-  const lines = ['flowchart TD']
+function generateFlowchart(nodes, edges, direction) {
+  const dir = direction || 'TD'
+  if (nodes.length === 0) return `flowchart ${dir}`
+  const lines = [`flowchart ${dir}`]
   const idMap = new Map() // node.id → mermaid letter ID
   nodes.forEach((node, i) => {
     const id = indexToLetter(i)
@@ -140,11 +141,11 @@ function generateClass(nodes, edges) {
   return lines.join('\n')
 }
 
-export function generateCode(type, nodes, edges) {
+export function generateCode(type, nodes, edges, options) {
   switch (type) {
     case 'sequence': return generateSequence(nodes, edges)
     case 'er':       return generateER(nodes, edges)
     case 'class':    return generateClass(nodes, edges)
-    default:         return generateFlowchart(nodes, edges)
+    default:         return generateFlowchart(nodes, edges, options?.direction)
   }
 }
