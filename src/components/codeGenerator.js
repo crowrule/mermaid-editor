@@ -90,9 +90,11 @@ function generateSequence(nodes, edges) {
   return lines.join('\n')
 }
 
-function generateER(nodes, edges) {
+function generateER(nodes, edges, direction) {
+  const dir = direction || 'TD'
   if (nodes.length === 0) return 'erDiagram'
   const lines = ['erDiagram']
+  if (dir !== 'TD') lines.push(`  direction ${dir}`)
   // Standalone entities (no edges yet)
   const connectedIds = new Set(edges.flatMap(e => [e.from, e.to]))
   nodes.forEach(node => {
@@ -118,9 +120,11 @@ function generateER(nodes, edges) {
   return lines.join('\n')
 }
 
-function generateClass(nodes, edges) {
+function generateClass(nodes, edges, direction) {
+  const dir = direction || 'TD'
   if (nodes.length === 0) return 'classDiagram'
   const lines = ['classDiagram']
+  if (dir !== 'TD') lines.push(`  direction ${dir}`)
   nodes.forEach(node => {
     lines.push(`  class ${node.label}`)
   })
@@ -142,10 +146,11 @@ function generateClass(nodes, edges) {
 }
 
 export function generateCode(type, nodes, edges, options) {
+  const dir = options?.direction
   switch (type) {
     case 'sequence': return generateSequence(nodes, edges)
-    case 'er':       return generateER(nodes, edges)
-    case 'class':    return generateClass(nodes, edges)
-    default:         return generateFlowchart(nodes, edges, options?.direction)
+    case 'er':       return generateER(nodes, edges, dir)
+    case 'class':    return generateClass(nodes, edges, dir)
+    default:         return generateFlowchart(nodes, edges, dir)
   }
 }

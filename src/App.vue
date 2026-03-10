@@ -7,7 +7,7 @@ import DiagramEditor from './components/DiagramEditor.vue'
 import ToolBar from './components/ToolBar.vue'
 
 const diagramType = ref('flowchart')
-const flowchartDirection = ref('TD')
+const diagramDirection = ref('TD')
 const nodes = ref([])
 const edges = ref([])
 const diagramCode = ref('')
@@ -97,8 +97,8 @@ onUnmounted(() => {
 })
 
 // Auto-generate mermaid code whenever visual state changes
-watch([diagramType, flowchartDirection, nodes, edges], () => {
-  diagramCode.value = generateCode(diagramType.value, nodes.value, edges.value, { direction: flowchartDirection.value })
+watch([diagramType, diagramDirection, nodes, edges], () => {
+  diagramCode.value = generateCode(diagramType.value, nodes.value, edges.value, { direction: diagramDirection.value })
 }, { deep: true })
 
 // Clear canvas when diagram type changes
@@ -107,6 +107,7 @@ watch(diagramType, () => {
   edges.value = []
   nodeIdCounter = 1
   edgeIdCounter = 1
+  diagramDirection.value = 'TD'
 })
 
 // ── default label per type ────────────────────────────────────────────────────
@@ -202,7 +203,7 @@ function handleCodeChange(code) {
         class="shrink-0 min-w-0"
         :style="{ width: leftPct + '%' }"
         :diagram-type="diagramType"
-        :flowchart-direction="flowchartDirection"
+        :diagram-direction="diagramDirection"
         :nodes="nodes"
         :edges="edges"
         @add-node="handleAddNode"
@@ -211,7 +212,7 @@ function handleCodeChange(code) {
         @delete-node="handleDeleteNode"
         @delete-edge="handleDeleteEdge"
         @update-label="handleUpdateLabel"
-        @update:flowchart-direction="flowchartDirection = $event"
+        @update:diagram-direction="diagramDirection = $event"
       />
 
       <!-- Draggable divider -->

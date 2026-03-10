@@ -4,7 +4,7 @@ import DiagramCanvas from './DiagramCanvas.vue'
 
 const props = defineProps({
   diagramType: { type: String, required: true },
-  flowchartDirection: { type: String, default: 'TD' },
+  diagramDirection: { type: String, default: 'TD' },
   nodes: { type: Array, required: true },
   edges: { type: Array, required: true },
 })
@@ -12,7 +12,7 @@ const props = defineProps({
 const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
   'delete-node', 'delete-edge', 'update-label',
-  'update:flowchartDirection',
+  'update:diagramDirection',
 ])
 
 const mode = ref('add')
@@ -127,7 +127,7 @@ function edgeTypeClass(t) {
     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
 }
 function directionClass(d) {
-  return props.flowchartDirection === d
+  return props.diagramDirection === d
     ? 'bg-indigo-600 text-white'
     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
 }
@@ -149,16 +149,16 @@ function directionClass(d) {
           @click="selectedNodeType = nt.type"
         >{{ nt.label }}</button>
 
-        <!-- direction toggle (flowchart only) -->
-        <template v-if="diagramType === 'flowchart'">
+        <!-- direction toggle (all types except sequence) -->
+        <template v-if="diagramType !== 'sequence'">
           <div class="w-px h-5 self-center bg-gray-600" />
           <button
             :class="['px-2.5 py-1 text-xs rounded transition-colors', directionClass('TD')]"
-            @click="emit('update:flowchartDirection', 'TD')"
+            @click="emit('update:diagramDirection', 'TD')"
           >↓ TD</button>
           <button
             :class="['px-2.5 py-1 text-xs rounded transition-colors', directionClass('LR')]"
-            @click="emit('update:flowchartDirection', 'LR')"
+            @click="emit('update:diagramDirection', 'LR')"
           >→ LR</button>
         </template>
       </div>
