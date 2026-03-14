@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
   nodes: { type: Array, required: true },
@@ -12,8 +12,37 @@ const props = defineProps({
 
 const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
-  'delete-node', 'delete-edge', 'update-node-label',
+  'delete-node', 'delete-edge', 'update-node-label', 'update-edge-label',
+  'add-attribute', 'delete-attribute', 'update-edge-type',
 ])
+
+// Cardinality options for each side of an ER relation
+const ER_FROM_CARDS = [
+  { value: '||', label: 'Exactly one'  },
+  { value: '|o', label: 'Zero or one'  },
+  { value: '}|', label: 'One or more'  },
+  { value: '}o', label: 'Zero or more' },
+]
+const ER_TO_CARDS = [
+  { value: '||', label: 'Exactly one'  },
+  { value: 'o|', label: 'Zero or one'  },
+  { value: '|{', label: 'One or more'  },
+  { value: 'o{', label: 'Zero or more' },
+]
+
+function parseERSides(edgeType) {
+  if (edgeType?.includes('--')) {
+    const [left, right] = edgeType.split('--')
+    return { left, right }
+  }
+  // legacy preset fallback
+  switch (edgeType) {
+    case '1:1':        return { left: '||', right: '||' }
+    case 'N:N':        return { left: '}o', right: 'o{' }
+    case 'strict-1:N': return { left: '||', right: '|{' }
+    default:           return { left: '||', right: 'o{' }
+  }
+}
 
 // ── constants ────────────────────────────────────────────────────────────────
 const NODE_W = 120
@@ -25,7 +54,26 @@ const SEQ_MESSAGE_START_Y = 110
 const SEQ_MESSAGE_SPACING = 50
 
 // ── state ────────────────────────────────────────────────────────────────────
+const containerRef = ref(null)
 const svgRef = ref(null)
+
+// context menu (ER edge type)
+const ctxEdgeId = ref(null)
+const ctxX = ref(0)
+const ctxY = ref(0)
+const ctxEdge = computed(() =>
+  ctxEdgeId.value !== null ? props.edges.find(e => e.id === ctxEdgeId.value) ?? null : null
+)
+const ctxParsed = computed(() => parseERSides(ctxEdge.value?.edgeType))
+const ctxFromNode = computed(() => ctxEdge.value ? props.nodes.find(n => n.id === ctxEdge.value.from) : null)
+const ctxToNode   = computed(() => ctxEdge.value ? props.nodes.find(n => n.id === ctxEdge.value.to)   : null)
+// Close menu when clicking outside the canvas container
+function onDocMousedown(e) {
+  if (containerRef.value && !containerRef.value.contains(e.target))
+    ctxEdgeId.value = null
+}
+onMounted(() => document.addEventListener('mousedown', onDocMousedown))
+onUnmounted(() => document.removeEventListener('mousedown', onDocMousedown))
 const selectedId = ref(null)
 const selectedEdgeId = ref(null)
 const connectSource = ref(null)
@@ -35,15 +83,43 @@ let dragging = null
 let dragOffX = 0
 let dragOffY = 0
 
-// inline edit
+// inline edit — node
 const editingNodeId = ref(null)
 const editLabel = ref('')
 const editInputRef = ref(null)
+
+// inline add attribute
+const addingAttrNodeId = ref(null)
+const newAttrType = ref('string')
+const newAttrName = ref('')
+const newAttrTypeInputRef = ref(null)
+const newAttrNameInputRef = ref(null)
+
+// inline edit — edge
+const editingEdgeId = ref(null)
+const editEdgeLabel = ref('')
+const editEdgeInputRef = ref(null)
+const editingEdge = computed(() =>
+  editingEdgeId.value !== null
+    ? props.edges.find(e => e.id === editingEdgeId.value) ?? null
+    : null
+)
+// If the edge being edited disappears (e.g. deleted), cancel the edit
+watch(editingEdge, (e) => { if (editingEdgeId.value !== null && !e) editingEdgeId.value = null })
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 function svgPoint(e) {
   const rect = svgRef.value.getBoundingClientRect()
   return { x: e.clientX - rect.left, y: e.clientY - rect.top }
+}
+
+// ── entity attribute helpers ──────────────────────────────────────────────────
+function entityHeight(node) {
+  return NODE_H + (node.attributes?.length || 0) * 20
+}
+// Geometric center of the full entity box (shifted down by half the attribute area)
+function erEntityCenter(node) {
+  return { x: node.x, y: node.y + (node.attributes?.length || 0) * 10 }
 }
 
 // ── sequence layout (computed positions, not stored in node) ─────────────────
@@ -106,6 +182,21 @@ function strokeColor(node) {
 }
 
 // ── edge path helpers ─────────────────────────────────────────────────────────
+
+// Intersection of a ray from (cx,cy) in direction (ux,uy) with a rect of given half-dimensions
+function entityBoundaryPoint(cx, cy, ux, uy, halfW = NODE_W / 2, halfH = NODE_H / 2) {
+  const w = halfW, h = halfH
+  const adx = Math.abs(ux), ady = Math.abs(uy)
+  if (adx < 0.0001 && ady < 0.0001) return { x: cx, y: cy }
+  if (adx * h > ady * w) {
+    const t = w / adx
+    return { x: cx + Math.sign(ux) * w, y: cy + uy * t }
+  } else {
+    const t = h / ady
+    return { x: cx + ux * t, y: cy + Math.sign(uy) * h }
+  }
+}
+
 function edgePath(edge) {
   const fromNode = props.nodes.find(n => n.id === edge.from)
   const toNode   = props.nodes.find(n => n.id === edge.to)
@@ -116,10 +207,22 @@ function edgePath(edge) {
     const y  = seqMsgY(edge)
     return `M${x1},${y} L${x2},${y}`
   }
+  // ER: path from entity boundary to entity boundary using geometric center of expanded box
+  if (props.diagramType === 'er') {
+    const fc = erEntityCenter(fromNode)
+    const tc = erEntityCenter(toNode)
+    const dx = tc.x - fc.x, dy = tc.y - fc.y
+    const len = Math.sqrt(dx * dx + dy * dy) || 1
+    const ux = dx / len, uy = dy / len
+    const fp = entityBoundaryPoint(fc.x, fc.y,  ux,  uy, NODE_W / 2, entityHeight(fromNode) / 2)
+    const tp = entityBoundaryPoint(tc.x, tc.y, -ux, -uy, NODE_W / 2, entityHeight(toNode) / 2)
+    return `M${fp.x},${fp.y} L${tp.x},${tp.y}`
+  }
   return `M${fromNode.x},${fromNode.y} L${toNode.x},${toNode.y}`
 }
 
 function edgeMidpoint(edge) {
+  if (!edge) return { x: 0, y: 0 }
   const fromNode = props.nodes.find(n => n.id === edge.from)
   const toNode   = props.nodes.find(n => n.id === edge.to)
   if (!fromNode || !toNode) return { x: 0, y: 0 }
@@ -128,6 +231,11 @@ function edgeMidpoint(edge) {
     const y = seqMsgY(edge) - 10
     return { x, y }
   }
+  if (props.diagramType === 'er') {
+    const fc = erEntityCenter(fromNode)
+    const tc = erEntityCenter(toNode)
+    return { x: (fc.x + tc.x) / 2, y: (fc.y + tc.y) / 2 - 10 }
+  }
   return {
     x: (fromNode.x + toNode.x) / 2,
     y: (fromNode.y + toNode.y) / 2 - 10,
@@ -135,22 +243,49 @@ function edgeMidpoint(edge) {
 }
 
 function edgeStrokeDasharray(edgeType) {
+  if (props.diagramType === 'er') return 'none'
   if (edgeType === 'dotted' || edgeType === '-->>') return '6 4'
   return 'none'
 }
 
-function edgeMarkerEnd(edgeType) {
-  if (edgeType === 'open') return ''
-  if (edgeType === 'cross') return 'url(#arrowCross)'
-  return 'url(#arrowHead)'
+const ER_START_MARKER = {
+  '||': 'url(#er-s-exact-one)',
+  '|o': 'url(#er-s-zero-one)',
+  '}|': 'url(#er-s-one-more)',
+  '}o': 'url(#er-s-zero-more)',
+}
+const ER_END_MARKER = {
+  '||': 'url(#er-e-exact-one)',
+  'o|': 'url(#er-e-zero-one)',
+  '|{': 'url(#er-e-one-more)',
+  'o{': 'url(#er-e-zero-more)',
+}
+
+function edgeMarkerStart(edge) {
+  if (props.diagramType !== 'er') return ''
+  const { left } = parseERSides(edge.edgeType)
+  return ER_START_MARKER[left] ?? 'url(#er-s-exact-one)'
+}
+
+function edgeMarkerEnd(edge) {
+  if (props.diagramType !== 'er') {
+    if (edge.edgeType === 'open') return ''
+    if (edge.edgeType === 'cross') return 'url(#arrowCross)'
+    return 'url(#arrowHead)'
+  }
+  const { right } = parseERSides(edge.edgeType)
+  return ER_END_MARKER[right] ?? 'url(#er-e-zero-more)'
 }
 
 // ── mouse handlers ────────────────────────────────────────────────────────────
-function onSvgDown(e) {
-  if (e.target !== svgRef.value) return
+
+// Called when the transparent background rect is clicked (guarantees background-only hit)
+function onBgMousedown(e) {
   selectedId.value = null
   selectedEdgeId.value = null
   connectSource.value = null
+  addingAttrNodeId.value = null
+  ctxEdgeId.value = null
 
   if (props.mode === 'add') {
     const pt = svgPoint(e)
@@ -161,6 +296,8 @@ function onSvgDown(e) {
 function onNodeDown(e, node) {
   e.stopPropagation()
   selectedEdgeId.value = null
+  if (addingAttrNodeId.value !== null && addingAttrNodeId.value !== node.id)
+    addingAttrNodeId.value = null
 
   if (props.mode === 'delete') {
     emit('delete-node', node.id)
@@ -186,8 +323,27 @@ function onNodeDown(e, node) {
   }
 }
 
+function onEdgeContextMenu(e, edge) {
+  if (props.diagramType !== 'er') return
+  const rect = containerRef.value.getBoundingClientRect()
+  ctxX.value = e.clientX - rect.left
+  ctxY.value = e.clientY - rect.top
+  ctxEdgeId.value = edge.id
+}
+
+function selectFromCard(card) {
+  if (ctxEdgeId.value !== null)
+    emit('update-edge-type', ctxEdgeId.value, `${card}--${ctxParsed.value.right}`)
+}
+function selectToCard(card) {
+  if (ctxEdgeId.value !== null)
+    emit('update-edge-type', ctxEdgeId.value, `${ctxParsed.value.left}--${card}`)
+}
+
 function onEdgeClick(e, edge) {
   e.stopPropagation()
+  ctxEdgeId.value = null
+  addingAttrNodeId.value = null
   if (props.mode === 'delete') {
     emit('delete-edge', edge.id)
     return
@@ -221,10 +377,48 @@ function commitEdit() {
   }
 }
 
+function startEdgeEdit(edge) {
+  if (props.mode === 'delete' || props.mode === 'connect') return
+  editingEdgeId.value = edge.id
+  editEdgeLabel.value = edge.label || ''
+  nextTick(() => editEdgeInputRef.value?.focus())
+}
+
+function startAddAttr(node, e) {
+  e?.stopPropagation()
+  addingAttrNodeId.value = node.id
+  newAttrType.value = 'string'
+  newAttrName.value = ''
+  nextTick(() => newAttrTypeInputRef.value?.focus())
+}
+
+function commitAddAttr() {
+  if (addingAttrNodeId.value !== null) {
+    const name = newAttrName.value.trim()
+    const type = newAttrType.value.trim() || 'string'
+    if (name) emit('add-attribute', addingAttrNodeId.value, type, name)
+    addingAttrNodeId.value = null
+  }
+}
+
+function onAttrRowMousedown(e, nodeId, index) {
+  // Attribute row always stops propagation to prevent entity select/delete
+  if (props.mode === 'delete') emit('delete-attribute', nodeId, index)
+}
+
+function commitEdgeEdit() {
+  if (editingEdgeId.value !== null) {
+    emit('update-edge-label', editingEdgeId.value, editEdgeLabel.value)
+    editingEdgeId.value = null
+  }
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (editingNodeId.value !== null) return
+    if (editingNodeId.value !== null)   return
+    if (editingEdgeId.value !== null)   return
+    if (addingAttrNodeId.value !== null) return
     if (selectedId.value !== null) {
       emit('delete-node', selectedId.value)
       selectedId.value = null
@@ -236,20 +430,24 @@ function onKeyDown(e) {
   if (e.key === 'Escape') {
     connectSource.value = null
     editingNodeId.value = null
+    editingEdgeId.value = null
+    addingAttrNodeId.value = null
+    ctxEdgeId.value = null
   }
 }
 </script>
 
 <template>
+  <div ref="containerRef" class="w-full h-full" style="position:relative">
   <svg
     ref="svgRef"
     class="w-full h-full"
     :style="{ cursor: mode === 'add' ? 'crosshair' : mode === 'connect' ? 'cell' : 'default' }"
     tabindex="0"
-    @mousedown="onSvgDown"
     @mousemove="onMouseMove"
     @mouseup="onMouseUp"
     @keydown="onKeyDown"
+    @contextmenu.prevent
   >
     <!-- ── defs: arrowhead markers ── -->
     <defs>
@@ -262,7 +460,58 @@ function onKeyDown(e) {
         <line x1="0" y1="0" x2="10" y2="10" stroke="#f87171" stroke-width="2"/>
         <line x1="10" y1="0" x2="0" y2="10" stroke="#f87171" stroke-width="2"/>
       </marker>
+
+      <!-- ER cardinality markers — START (entity at low-x, path goes right) -->
+      <!-- || exactly one: two bars -->
+      <marker id="er-s-exact-one" markerWidth="9" markerHeight="14" refX="1" refY="7" orient="auto">
+        <line x1="2" y1="1" x2="2" y2="13" stroke="#60a5fa" stroke-width="2"/>
+        <line x1="6" y1="1" x2="6" y2="13" stroke="#60a5fa" stroke-width="2"/>
+      </marker>
+      <!-- |o zero-or-one: bar (max) + circle (min) -->
+      <marker id="er-s-zero-one" markerWidth="13" markerHeight="14" refX="1" refY="7" orient="auto">
+        <line x1="2" y1="1" x2="2" y2="13" stroke="#60a5fa" stroke-width="2"/>
+        <circle cx="8" cy="7" r="3" stroke="#60a5fa" fill="none" stroke-width="1.5"/>
+      </marker>
+      <!-- }| one-or-more: crow's foot (max) + bar (min) -->
+      <marker id="er-s-one-more" markerWidth="16" markerHeight="14" refX="1" refY="7" orient="auto">
+        <path d="M 9,7 L 2,1 M 9,7 L 2,7 M 9,7 L 2,13" stroke="#60a5fa" stroke-width="1.5" fill="none"/>
+        <line x1="13" y1="1" x2="13" y2="13" stroke="#60a5fa" stroke-width="2"/>
+      </marker>
+      <!-- }o zero-or-more: crow's foot (max) + circle (min) -->
+      <marker id="er-s-zero-more" markerWidth="19" markerHeight="14" refX="1" refY="7" orient="auto">
+        <path d="M 9,7 L 2,1 M 9,7 L 2,7 M 9,7 L 2,13" stroke="#60a5fa" stroke-width="1.5" fill="none"/>
+        <circle cx="14" cy="7" r="3" stroke="#60a5fa" fill="none" stroke-width="1.5"/>
+      </marker>
+
+      <!-- ER cardinality markers — END (entity at high-x, path comes from left) -->
+      <!-- || exactly one: two bars -->
+      <marker id="er-e-exact-one" markerWidth="9" markerHeight="14" refX="8" refY="7" orient="auto">
+        <line x1="3" y1="1" x2="3" y2="13" stroke="#60a5fa" stroke-width="2"/>
+        <line x1="7" y1="1" x2="7" y2="13" stroke="#60a5fa" stroke-width="2"/>
+      </marker>
+      <!-- o| zero-or-one: circle (min) + bar (max) -->
+      <marker id="er-e-zero-one" markerWidth="13" markerHeight="14" refX="12" refY="7" orient="auto">
+        <circle cx="5" cy="7" r="3" stroke="#60a5fa" fill="none" stroke-width="1.5"/>
+        <line x1="10" y1="1" x2="10" y2="13" stroke="#60a5fa" stroke-width="2"/>
+      </marker>
+      <!-- |{ one-or-more: bar (min) + crow's foot (max) -->
+      <marker id="er-e-one-more" markerWidth="16" markerHeight="14" refX="15" refY="7" orient="auto">
+        <line x1="2" y1="1" x2="2" y2="13" stroke="#60a5fa" stroke-width="2"/>
+        <path d="M 7,7 L 14,1 M 7,7 L 14,7 M 7,7 L 14,13" stroke="#60a5fa" stroke-width="1.5" fill="none"/>
+      </marker>
+      <!-- o{ zero-or-more: circle (min) + crow's foot (max) -->
+      <marker id="er-e-zero-more" markerWidth="19" markerHeight="14" refX="18" refY="7" orient="auto">
+        <circle cx="4" cy="7" r="3" stroke="#60a5fa" fill="none" stroke-width="1.5"/>
+        <path d="M 10,7 L 17,1 M 10,7 L 17,7 M 10,7 L 17,13" stroke="#60a5fa" stroke-width="1.5" fill="none"/>
+      </marker>
     </defs>
+
+    <!-- ── background: catches all clicks on empty canvas (must be before nodes/edges) ── -->
+    <rect
+      x="0" y="0" width="100%" height="100%"
+      fill="transparent"
+      @mousedown="onBgMousedown"
+    />
 
     <!-- ── sequence lifelines ── -->
     <template v-if="isSequence">
@@ -281,6 +530,8 @@ function onKeyDown(e) {
       :key="'edge-' + edge.id"
       class="cursor-pointer"
       @mousedown.stop="onEdgeClick($event, edge)"
+      @dblclick.stop="startEdgeEdit(edge)"
+      @contextmenu.prevent.stop="onEdgeContextMenu($event, edge)"
     >
       <path
         :d="edgePath(edge)"
@@ -288,7 +539,8 @@ function onKeyDown(e) {
         :stroke="selectedEdgeId === edge.id ? '#f59e0b' : '#60a5fa'"
         stroke-width="2"
         :stroke-dasharray="edgeStrokeDasharray(edge.edgeType)"
-        :marker-end="edgeMarkerEnd(edge.edgeType)"
+        :marker-start="edgeMarkerStart(edge)"
+        :marker-end="edgeMarkerEnd(edge)"
       />
       <!-- hit area -->
       <path :d="edgePath(edge)" fill="none" stroke="transparent" stroke-width="12" />
@@ -311,8 +563,8 @@ function onKeyDown(e) {
       @mousedown.stop="onNodeDown($event, node)"
       @dblclick.stop="startEdit(node)"
     >
-      <!-- process / participant / entity / class → plain rect -->
-      <template v-if="['process','participant','entity','class'].includes(node.type)">
+      <!-- process / participant / class → plain rect -->
+      <template v-if="['process','participant','class'].includes(node.type)">
         <rect
           :x="effectiveX(node) - NODE_W / 2"
           :y="effectiveY(node) - NODE_H / 2"
@@ -321,6 +573,74 @@ function onKeyDown(e) {
           :stroke="strokeColor(node)"
           stroke-width="2"
         />
+      </template>
+
+      <!-- entity → expandable rect with attribute rows -->
+      <template v-if="node.type === 'entity'">
+        <rect
+          :x="effectiveX(node) - NODE_W / 2"
+          :y="effectiveY(node) - NODE_H / 2"
+          :width="NODE_W" :height="entityHeight(node)"
+          :fill="nodeColor('entity').fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+        <!-- header/body divider -->
+        <line
+          v-if="node.attributes?.length"
+          :x1="effectiveX(node) - NODE_W / 2" :y1="effectiveY(node) + NODE_H / 2"
+          :x2="effectiveX(node) + NODE_W / 2" :y2="effectiveY(node) + NODE_H / 2"
+          :stroke="nodeColor('entity').stroke" stroke-width="1" opacity="0.5"
+        />
+        <!-- attribute rows -->
+        <g
+          v-for="(attr, i) in (node.attributes || [])"
+          :key="'attr-' + i"
+          @mousedown.stop="onAttrRowMousedown($event, node.id, i)"
+          style="cursor:default"
+        >
+          <rect
+            :x="effectiveX(node) - NODE_W / 2"
+            :y="effectiveY(node) + NODE_H / 2 + i * 20"
+            :width="NODE_W" height="20"
+            :fill="mode === 'delete' ? 'rgba(248,113,113,0.12)' : 'transparent'"
+            style="cursor:pointer"
+          />
+          <text
+            :x="effectiveX(node) - NODE_W / 2 + 6"
+            :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+            fill="#5eead4" font-size="10" text-anchor="start" pointer-events="none"
+          >{{ attr.dataType }}</text>
+          <text
+            :x="effectiveX(node) - NODE_W / 2 + 56"
+            :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+            fill="#e2e8f0" font-size="10" text-anchor="start" pointer-events="none"
+          >{{ attr.name }}</text>
+          <text
+            v-if="mode === 'delete'"
+            :x="effectiveX(node) + NODE_W / 2 - 8"
+            :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+            fill="#f87171" font-size="11" text-anchor="middle" pointer-events="none"
+          >×</text>
+        </g>
+        <!-- "+ attr" button (select mode, selected, not currently adding) -->
+        <g
+          v-if="mode === 'select' && selectedId === node.id && addingAttrNodeId !== node.id"
+          @mousedown.stop="startAddAttr(node, $event)"
+          style="cursor:pointer"
+        >
+          <rect
+            :x="effectiveX(node) - 20"
+            :y="effectiveY(node) - NODE_H / 2 + entityHeight(node) + 3"
+            width="40" height="14" rx="2"
+            fill="#0f766e" opacity="0.85"
+          />
+          <text
+            :x="effectiveX(node)"
+            :y="effectiveY(node) - NODE_H / 2 + entityHeight(node) + 13"
+            fill="#ccfbf1" font-size="9" text-anchor="middle" pointer-events="none"
+          >+ attr</text>
+        </g>
       </template>
 
       <!-- terminal → stadium (rounded rect) -->
@@ -499,6 +819,58 @@ function onKeyDown(e) {
       </div>
     </foreignObject>
 
+    <!-- ── inline attribute add form ── -->
+    <foreignObject
+      v-if="addingAttrNodeId !== null"
+      :x="(() => { const n = nodes.find(n => n.id === addingAttrNodeId); return n ? effectiveX(n) - NODE_W / 2 : 0 })()"
+      :y="(() => { const n = nodes.find(n => n.id === addingAttrNodeId); return n ? effectiveY(n) - NODE_H / 2 + entityHeight(n) + 20 : 0 })()"
+      width="210" height="28"
+    >
+      <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;gap:3px;height:100%">
+        <input
+          ref="newAttrTypeInputRef"
+          v-model="newAttrType"
+          placeholder="type"
+          @keydown.enter.stop="commitAddAttr"
+          @keydown.tab.prevent="newAttrNameInputRef?.focus()"
+          @keydown.escape.stop="addingAttrNodeId = null"
+          style="width:64px;background:#0f172a;color:#5eead4;border:1px solid #2dd4bf;font-size:11px;padding:2px 4px;outline:none;box-sizing:border-box;"
+        />
+        <input
+          ref="newAttrNameInputRef"
+          v-model="newAttrName"
+          placeholder="name"
+          @keydown.enter.stop="commitAddAttr"
+          @keydown.escape.stop="addingAttrNodeId = null"
+          style="width:96px;background:#0f172a;color:#e2e8f0;border:1px solid #2dd4bf;font-size:11px;padding:2px 4px;outline:none;box-sizing:border-box;"
+        />
+        <button
+          @mousedown.prevent.stop="commitAddAttr"
+          style="background:#0f766e;color:#ccfbf1;border:none;font-size:11px;padding:2px 7px;cursor:pointer;border-radius:2px;"
+        >✓</button>
+      </div>
+    </foreignObject>
+
+    <!-- ── inline edge label editor ── -->
+    <foreignObject
+      v-if="editingEdge"
+      :x="edgeMidpoint(editingEdge).x - 70"
+      :y="edgeMidpoint(editingEdge).y - 2"
+      width="140"
+      height="26"
+    >
+      <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+        <input
+          ref="editEdgeInputRef"
+          v-model="editEdgeLabel"
+          @keydown.enter.stop="commitEdgeEdit"
+          @keydown.escape.stop="editingEdgeId = null"
+          @blur="commitEdgeEdit"
+          style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:12px;text-align:center;padding:2px 4px;box-sizing:border-box;outline:none;border-radius:3px;"
+        />
+      </div>
+    </foreignObject>
+
     <!-- ── empty state hint ── -->
     <text
       v-if="nodes.length === 0"
@@ -510,4 +882,50 @@ function onKeyDown(e) {
       pointer-events="none"
     >Select a node type and click "Add" mode, then click here to place nodes</text>
   </svg>
+
+  <!-- ── ER relation cardinality context menu ── -->
+  <div
+    v-if="ctxEdgeId !== null"
+    :style="{ position: 'absolute', left: ctxX + 'px', top: ctxY + 'px', zIndex: 50 }"
+    class="bg-gray-800 border border-gray-600 rounded shadow-xl py-1 w-52 text-sm"
+    @mousedown.stop
+  >
+    <!-- From side -->
+    <div class="px-3 py-1 text-xs text-teal-400 font-semibold tracking-wide">
+      From: {{ ctxFromNode?.label ?? '?' }}
+    </div>
+    <div
+      v-for="opt in ER_FROM_CARDS"
+      :key="'f-' + opt.value"
+      :class="[
+        'flex items-center gap-2 px-3 py-1 cursor-pointer transition-colors',
+        ctxParsed.left === opt.value ? 'bg-indigo-700 text-white' : 'text-gray-200 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectFromCard(opt.value)"
+    >
+      <code class="w-6 text-center font-mono text-xs opacity-75">{{ opt.value }}</code>
+      <span>{{ opt.label }}</span>
+    </div>
+
+    <div class="my-1 border-t border-gray-700" />
+
+    <!-- To side -->
+    <div class="px-3 py-1 text-xs text-teal-400 font-semibold tracking-wide">
+      To: {{ ctxToNode?.label ?? '?' }}
+    </div>
+    <div
+      v-for="opt in ER_TO_CARDS"
+      :key="'t-' + opt.value"
+      :class="[
+        'flex items-center gap-2 px-3 py-1 cursor-pointer transition-colors',
+        ctxParsed.right === opt.value ? 'bg-indigo-700 text-white' : 'text-gray-200 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectToCard(opt.value)"
+    >
+      <code class="w-6 text-center font-mono text-xs opacity-75">{{ opt.value }}</code>
+      <span>{{ opt.label }}</span>
+    </div>
+  </div>
+
+  </div>
 </template>

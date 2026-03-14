@@ -43,6 +43,8 @@ async function renderDiagram(code) {
   } catch (err) {
     renderError.value = err.message ?? 'Diagram syntax error'
     containerRef.value.innerHTML = ''
+    // Reset mermaid instance so next render starts fresh (avoids state corruption)
+    mermaid = null
   }
 }
 

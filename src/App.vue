@@ -28,8 +28,9 @@ function handleDiagramTypeChange(e) {
 }
 
 function confirmDiagramTypeChange() {
-  diagramType.value = pendingDiagramType.value
+  const type = pendingDiagramType.value
   pendingDiagramType.value = null
+  diagramType.value = type
 }
 
 function cancelDiagramTypeChange() {
@@ -126,13 +127,28 @@ function uniqueLabel(type) {
 
 // ── node / edge mutations ─────────────────────────────────────────────────────
 function handleAddNode(x, y, type) {
-  nodes.value.push({
+  const node = {
     id: nodeIdCounter++,
     type: type || 'process',
     label: uniqueLabel(type),
     x,
     y,
-  })
+  }
+  if (type === 'entity') node.attributes = []
+  nodes.value.push(node)
+}
+
+function handleAddAttribute(nodeId, dataType, name) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node) return
+  if (!node.attributes) node.attributes = []
+  node.attributes.push({ dataType, name })
+}
+
+function handleDeleteAttribute(nodeId, index) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node || !node.attributes) return
+  node.attributes.splice(index, 1)
 }
 
 function handleMoveNode(id, x, y) {
@@ -144,13 +160,20 @@ function handleAddEdge(fromId, toId, edgeType) {
   // Prevent duplicate edges
   const exists = edges.value.some(e => e.from === fromId && e.to === toId)
   if (exists) return
+  // ER always defaults to 1:N; other types use the toolbar selection
+  const type = diagramType.value === 'er' ? '||--o{' : (edgeType || 'arrow')
   edges.value.push({
     id: edgeIdCounter++,
     from: fromId,
     to: toId,
     label: '',
-    edgeType: edgeType || 'arrow',
+    edgeType: type,
   })
+}
+
+function handleUpdateEdgeType(id, edgeType) {
+  const edge = edges.value.find(e => e.id === id)
+  if (edge) edge.edgeType = edgeType
 }
 
 function handleDeleteNode(id) {
@@ -165,6 +188,11 @@ function handleDeleteEdge(id) {
 function handleUpdateLabel(id, label) {
   const node = nodes.value.find(n => n.id === id)
   if (node) node.label = label
+}
+
+function handleUpdateEdgeLabel(id, label) {
+  const edge = edges.value.find(e => e.id === id)
+  if (edge) edge.label = label
 }
 
 function handleCodeChange(code) {
@@ -212,6 +240,10 @@ function handleCodeChange(code) {
         @delete-node="handleDeleteNode"
         @delete-edge="handleDeleteEdge"
         @update-label="handleUpdateLabel"
+        @update-edge-label="handleUpdateEdgeLabel"
+        @add-attribute="handleAddAttribute"
+        @delete-attribute="handleDeleteAttribute"
+        @update-edge-type="handleUpdateEdgeType"
         @update:diagram-direction="diagramDirection = $event"
       />
 

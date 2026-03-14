@@ -95,27 +95,36 @@ function generateER(nodes, edges, direction) {
   if (nodes.length === 0) return 'erDiagram'
   const lines = ['erDiagram']
   if (dir !== 'TD') lines.push(`  direction ${dir}`)
-  // Standalone entities (no edges yet)
   const connectedIds = new Set(edges.flatMap(e => [e.from, e.to]))
   nodes.forEach(node => {
-    if (!connectedIds.has(node.id)) {
-      lines.push(`  ${node.label.toUpperCase()}`)
+    const name = node.label.toUpperCase()
+    const attrs = node.attributes || []
+    if (attrs.length > 0) {
+      lines.push(`  ${name} {`)
+      attrs.forEach(attr => lines.push(`    ${attr.dataType} ${attr.name}`))
+      lines.push(`  }`)
+    } else if (!connectedIds.has(node.id)) {
+      lines.push(`  ${name}`)
     }
   })
   edges.forEach(edge => {
     const fromNode = nodes.find(n => n.id === edge.from)
     const toNode = nodes.find(n => n.id === edge.to)
     if (!fromNode || !toNode) return
-    const label = edge.label || 'relates'
+    const label = (edge.label || 'relates').replace(/"/g, "'")
     let rel
-    switch (edge.edgeType) {
-      case '1:1':   rel = '||--||'; break
-      case '1:N':   rel = '||--o{'; break
-      case 'N:N':   rel = '}o--o{'; break
-      case 'strict-1:N': rel = '||--|{'; break
-      default:      rel = '||--o{'; break
+    if (edge.edgeType?.includes('--')) {
+      rel = edge.edgeType  // new granular format: use directly
+    } else {
+      // legacy preset format
+      switch (edge.edgeType) {
+        case '1:1':        rel = '||--||'; break
+        case 'N:N':        rel = '}o--o{'; break
+        case 'strict-1:N': rel = '||--|{'; break
+        default:           rel = '||--o{'; break  // 1:N
+      }
     }
-    lines.push(`  ${fromNode.label.toUpperCase()} ${rel} ${toNode.label.toUpperCase()} : ${label}`)
+    lines.push(`  ${fromNode.label.toUpperCase()} ${rel} ${toNode.label.toUpperCase()} : "${label}"`)
   })
   return lines.join('\n')
 }

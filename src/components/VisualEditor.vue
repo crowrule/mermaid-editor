@@ -11,7 +11,8 @@ const props = defineProps({
 
 const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
-  'delete-node', 'delete-edge', 'update-label',
+  'delete-node', 'delete-edge', 'update-label', 'update-edge-label',
+  'add-attribute', 'delete-attribute', 'update-edge-type',
   'update:diagramDirection',
 ])
 
@@ -51,12 +52,7 @@ const toolbarConfig = computed(() => {
         nodeTypes: [
           { type: 'entity', label: '▭ Entity' },
         ],
-        edgeTypes: [
-          { type: '1:1',   label: '1:1' },
-          { type: '1:N',   label: '1:N' },
-          { type: 'N:N',   label: 'N:N' },
-          { type: 'strict-1:N', label: '||--|{' },
-        ],
+        edgeTypes: [], // set via right-click context menu on the relation line
       }
     case 'class':
       return {
@@ -109,6 +105,10 @@ function onAddEdge(fromId, toId) { emit('add-edge', fromId, toId, selectedEdgeTy
 function onDeleteNode(id) { emit('delete-node', id) }
 function onDeleteEdge(id) { emit('delete-edge', id) }
 function onUpdateLabel(id, label) { emit('update-label', id, label) }
+function onUpdateEdgeLabel(id, label) { emit('update-edge-label', id, label) }
+function onAddAttribute(nodeId, dataType, name) { emit('add-attribute', nodeId, dataType, name) }
+function onDeleteAttribute(nodeId, index) { emit('delete-attribute', nodeId, index) }
+function onUpdateEdgeType(id, edgeType) { emit('update-edge-type', id, edgeType) }
 
 // ── button class helpers ──────────────────────────────────────────────────────
 function modeClass(m) {
@@ -165,17 +165,18 @@ function directionClass(d) {
 
       <!-- Row 2: edge types + mode buttons (wraps to new line when narrow) -->
       <div :class="['flex flex-wrap items-center gap-1.5', isNarrow ? 'w-full' : '']">
-        <div v-if="!isNarrow" class="w-px h-5 bg-gray-600" />
-
-        <!-- edge type buttons -->
-        <div class="flex gap-1">
-          <button
-            v-for="et in toolbarConfig.edgeTypes"
-            :key="et.type"
-            :class="['px-2.5 py-1 text-xs rounded transition-colors', edgeTypeClass(et.type)]"
-            @click="selectedEdgeType = et.type"
-          >{{ et.label }}</button>
-        </div>
+        <!-- edge type buttons (hidden when diagram uses right-click context menu) -->
+        <template v-if="toolbarConfig.edgeTypes.length > 0">
+          <div v-if="!isNarrow" class="w-px h-5 bg-gray-600" />
+          <div class="flex gap-1">
+            <button
+              v-for="et in toolbarConfig.edgeTypes"
+              :key="et.type"
+              :class="['px-2.5 py-1 text-xs rounded transition-colors', edgeTypeClass(et.type)]"
+              @click="selectedEdgeType = et.type"
+            >{{ et.label }}</button>
+          </div>
+        </template>
 
         <div class="w-px h-5 bg-gray-600" />
 
@@ -212,6 +213,10 @@ function directionClass(d) {
         @delete-node="onDeleteNode"
         @delete-edge="onDeleteEdge"
         @update-node-label="onUpdateLabel"
+        @update-edge-label="onUpdateEdgeLabel"
+        @add-attribute="onAddAttribute"
+        @delete-attribute="onDeleteAttribute"
+        @update-edge-type="onUpdateEdgeType"
       />
     </div>
   </div>
