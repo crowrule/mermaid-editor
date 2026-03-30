@@ -8,6 +8,8 @@ const props = defineProps({
   mode: { type: String, default: 'select' },
   selectedNodeType: { type: String, default: 'process' },
   selectedEdgeType: { type: String, default: 'arrow' },
+  seqFlowCount:   { type: Number, default: 10 },
+  seqFlowSpacing: { type: Number, default: 50 },
 })
 
 const emit = defineEmits([
@@ -51,7 +53,7 @@ const SEQ_PARTICIPANT_SPACING = 160
 const SEQ_OFFSET_X = 100
 const SEQ_LIFELINE_TOP = 80
 const SEQ_MESSAGE_START_Y = 110
-const SEQ_MESSAGE_SPACING = 50
+// SEQ_MESSAGE_SPACING removed — now driven by seqFlowSpacing prop
 
 // ── state ────────────────────────────────────────────────────────────────────
 const containerRef = ref(null)
@@ -131,16 +133,14 @@ function seqX(node) {
 }
 
 function seqMsgY(edge) {
-  const sortedEdges = [...props.edges].sort((a, b) => a.id - b.id)
-  const idx = sortedEdges.findIndex(e => e.id === edge.id)
-  return SEQ_MESSAGE_START_Y + idx * SEQ_MESSAGE_SPACING
+  return SEQ_MESSAGE_START_Y + (edge.slot ?? 0) * props.seqFlowSpacing
 }
 
 function effectiveX(node) {
   return isSequence.value ? seqX(node) : node.x
 }
 function effectiveY(node) {
-  return isSequence.value ? 20 : node.y
+  return isSequence.value ? NODE_H / 2 + 20 : node.y
 }
 
 // ── node shape geometry ───────────────────────────────────────────────────────
@@ -289,7 +289,10 @@ function onBgMousedown(e) {
 
   if (props.mode === 'add') {
     const pt = svgPoint(e)
-    emit('add-node', pt.x, pt.y)
+    const MARGIN = 20
+    const x = Math.max(NODE_W / 2 + MARGIN, pt.x)
+    const y = Math.max(NODE_H / 2 + MARGIN, pt.y)
+    emit('add-node', x, y)
   }
 }
 
@@ -304,6 +307,7 @@ function onNodeDown(e, node) {
     return
   }
   if (props.mode === 'connect') {
+    if (isSequence.value) return  // slot circles handle connect in sequence
     if (!connectSource.value) {
       connectSource.value = node
     } else if (connectSource.value.id !== node.id) {
@@ -413,6 +417,20 @@ function commitEdgeEdit() {
   }
 }
 
+// ── sequence slot circle click ────────────────────────────────────────────────
+function onSlotClick(node, slotIdx) {
+  if (props.mode !== 'connect') return
+  if (!connectSource.value) {
+    connectSource.value = { nodeId: node.id, slot: slotIdx }
+  } else if (connectSource.value.nodeId !== node.id) {
+    emit('add-edge', connectSource.value.nodeId, node.id, connectSource.value.slot)
+    connectSource.value = null
+  } else {
+    // Same lifeline: re-select this slot position
+    connectSource.value = { nodeId: node.id, slot: slotIdx }
+  }
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -519,9 +537,31 @@ function onKeyDown(e) {
         v-for="node in nodes"
         :key="'life-' + node.id"
         :x1="seqX(node)" :y1="SEQ_LIFELINE_TOP"
-        :x2="seqX(node)" :y2="9999"
+        :x2="seqX(node)" :y2="SEQ_MESSAGE_START_Y + (seqFlowCount - 1) * seqFlowSpacing + 40"
         stroke="#374151" stroke-dasharray="6 4" stroke-width="1"
       />
+    </template>
+
+    <!-- ── sequence flow-slot circles ── -->
+    <template v-if="isSequence && nodes.length > 0">
+      <template v-for="node in nodes" :key="'slots-' + node.id">
+        <circle
+          v-for="si in seqFlowCount"
+          :key="'slot-' + si"
+          :cx="seqX(node)"
+          :cy="SEQ_MESSAGE_START_Y + (si - 1) * seqFlowSpacing"
+          :r="mode === 'connect' ? 6 : 3"
+          :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
+                  ? '#10b981'
+                  : (mode === 'connect' ? '#1e3a6e' : '#1f2937')"
+          :stroke="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
+                    ? '#10b981'
+                    : (mode === 'connect' ? '#60a5fa' : '#374151')"
+          stroke-width="1.5"
+          :style="mode === 'connect' ? 'cursor:pointer' : 'pointer-events:none'"
+          @mousedown.stop="onSlotClick(node, si - 1)"
+        />
+      </template>
     </template>
 
     <!-- ── edges ── -->

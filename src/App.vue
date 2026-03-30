@@ -156,19 +156,23 @@ function handleMoveNode(id, x, y) {
   if (node) { node.x = x; node.y = y }
 }
 
-function handleAddEdge(fromId, toId, edgeType) {
-  // Prevent duplicate edges
-  const exists = edges.value.some(e => e.from === fromId && e.to === toId)
-  if (exists) return
+function handleAddEdge(fromId, toId, edgeType, slot) {
+  // Sequence allows multiple messages between same participants; others prevent duplicates
+  if (diagramType.value !== 'sequence') {
+    const exists = edges.value.some(e => e.from === fromId && e.to === toId)
+    if (exists) return
+  }
   // ER always defaults to 1:N; other types use the toolbar selection
   const type = diagramType.value === 'er' ? '||--o{' : (edgeType || 'arrow')
-  edges.value.push({
+  const edge = {
     id: edgeIdCounter++,
     from: fromId,
     to: toId,
     label: '',
     edgeType: type,
-  })
+  }
+  if (slot !== undefined) edge.slot = slot
+  edges.value.push(edge)
 }
 
 function handleUpdateEdgeType(id, edgeType) {

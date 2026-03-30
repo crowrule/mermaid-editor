@@ -19,6 +19,8 @@ const emit = defineEmits([
 const mode = ref('add')
 const selectedNodeType = ref('process')
 const selectedEdgeType = ref('arrow')
+const seqFlowCount   = ref(10)
+const seqFlowSpacing = ref(50)
 
 // ── narrow toolbar detection ──────────────────────────────────────────────────
 const toolbarRef = ref(null)
@@ -101,7 +103,7 @@ function onAddNode(x, y) {
   emit('add-node', x, y, selectedNodeType.value)
 }
 function onMoveNode(id, x, y) { emit('move-node', id, x, y) }
-function onAddEdge(fromId, toId) { emit('add-edge', fromId, toId, selectedEdgeType.value) }
+function onAddEdge(fromId, toId, slot) { emit('add-edge', fromId, toId, selectedEdgeType.value, slot) }
 function onDeleteNode(id) { emit('delete-node', id) }
 function onDeleteEdge(id) { emit('delete-edge', id) }
 function onUpdateLabel(id, label) { emit('update-label', id, label) }
@@ -161,6 +163,25 @@ function directionClass(d) {
             @click="emit('update:diagramDirection', 'LR')"
           >→ LR</button>
         </template>
+
+        <!-- sequence flow settings -->
+        <template v-if="diagramType === 'sequence'">
+          <div class="w-px h-5 self-center bg-gray-600" />
+          <span class="text-xs text-gray-400">Flows</span>
+          <input
+            type="number"
+            v-model.number="seqFlowCount"
+            min="5" max="100"
+            class="w-14 px-1.5 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 focus:outline-none focus:border-indigo-400"
+          />
+          <span class="text-xs text-gray-400">Spacing</span>
+          <input
+            type="number"
+            v-model.number="seqFlowSpacing"
+            min="30" max="70"
+            class="w-14 px-1.5 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 focus:outline-none focus:border-indigo-400"
+          />
+        </template>
       </div>
 
       <!-- Row 2: edge types + mode buttons (wraps to new line when narrow) -->
@@ -191,7 +212,10 @@ function directionClass(d) {
         <!-- hint -->
         <span class="ml-auto text-xs text-gray-500 whitespace-nowrap">
           <template v-if="mode === 'add'">클릭해서 노드 배치</template>
-          <template v-else-if="mode === 'connect'">출발 → 도착 노드 순서로 클릭</template>
+          <template v-else-if="mode === 'connect'">
+            <template v-if="diagramType === 'sequence'">흐름 점 클릭 → 다른 참가자 흐름 점 클릭</template>
+            <template v-else>출발 → 도착 노드 순서로 클릭</template>
+          </template>
           <template v-else-if="mode === 'delete'">클릭해서 삭제 · Del 키</template>
           <template v-else>드래그로 이동 · 더블클릭 이름 변경 · Del 키</template>
         </span>
@@ -207,6 +231,8 @@ function directionClass(d) {
         :mode="mode"
         :selected-node-type="selectedNodeType"
         :selected-edge-type="selectedEdgeType"
+        :seq-flow-count="seqFlowCount"
+        :seq-flow-spacing="seqFlowSpacing"
         @add-node="onAddNode"
         @move-node="onMoveNode"
         @add-edge="onAddEdge"

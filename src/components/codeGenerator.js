@@ -68,16 +68,20 @@ function generateSequence(nodes, edges) {
   const lines = ['sequenceDiagram']
   // Sort participants by x position for display order
   const sorted = [...nodes].sort((a, b) => a.x - b.x)
-  sorted.forEach(node => {
+  // Use letter IDs (A, B, C...) to avoid keyword conflicts with labels like "Participant"/"Actor"
+  const idMap = new Map() // node.id → letter ID
+  sorted.forEach((node, i) => {
+    const id = indexToLetter(i)
+    idMap.set(node.id, id)
     const keyword = node.type === 'actor' ? 'actor' : 'participant'
-    lines.push(`  ${keyword} ${node.label}`)
+    lines.push(`  ${keyword} ${id} as ${node.label}`)
   })
-  // Sort messages by creation order (edge id)
-  const sortedEdges = [...edges].sort((a, b) => a.id - b.id)
+  // Sort messages by slot position (visual order), fallback to creation id
+  const sortedEdges = [...edges].sort((a, b) => (a.slot ?? a.id) - (b.slot ?? b.id))
   sortedEdges.forEach(edge => {
-    const fromNode = nodes.find(n => n.id === edge.from)
-    const toNode = nodes.find(n => n.id === edge.to)
-    if (!fromNode || !toNode) return
+    const fromId = idMap.get(edge.from)
+    const toId   = idMap.get(edge.to)
+    if (!fromId || !toId) return
     const label = edge.label || 'message'
     let arrow
     switch (edge.edgeType) {
@@ -85,7 +89,7 @@ function generateSequence(nodes, edges) {
       case 'cross':  arrow = '-x';   break
       default:       arrow = '->>'; break
     }
-    lines.push(`  ${fromNode.label}${arrow}${toNode.label}: ${label}`)
+    lines.push(`  ${fromId}${arrow}${toId}: ${label}`)
   })
   return lines.join('\n')
 }
