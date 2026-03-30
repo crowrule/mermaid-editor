@@ -79,6 +79,11 @@ onUnmounted(() => document.removeEventListener('mousedown', onDocMousedown))
 const selectedId = ref(null)
 const selectedEdgeId = ref(null)
 const connectSource = ref(null)
+const connectSourceNode = computed(() =>
+  isSequence.value && connectSource.value?.nodeId !== undefined
+    ? props.nodes.find(n => n.id === connectSource.value.nodeId) ?? null
+    : null
+)
 
 // drag
 let dragging = null
@@ -205,6 +210,10 @@ function edgePath(edge) {
     const x1 = seqX(fromNode)
     const x2 = seqX(toNode)
     const y  = seqMsgY(edge)
+    if (fromNode.id === toNode.id) {
+      // Self-loop: right-side rectangular arc
+      return `M ${x1},${y} L ${x1+50},${y} L ${x1+50},${y+24} L ${x1},${y+24}`
+    }
     return `M${x1},${y} L${x2},${y}`
   }
   // ER: path from entity boundary to entity boundary using geometric center of expanded box
@@ -227,6 +236,9 @@ function edgeMidpoint(edge) {
   const toNode   = props.nodes.find(n => n.id === edge.to)
   if (!fromNode || !toNode) return { x: 0, y: 0 }
   if (isSequence.value) {
+    if (fromNode.id === toNode.id) {
+      return { x: seqX(fromNode) + 58, y: seqMsgY(edge) + 12 }
+    }
     const x = (seqX(fromNode) + seqX(toNode)) / 2
     const y = seqMsgY(edge) - 10
     return { x, y }
@@ -431,6 +443,12 @@ function onSlotClick(node, slotIdx) {
   }
 }
 
+function onSelfLoop() {
+  if (!connectSource.value || !isSequence.value) return
+  emit('add-edge', connectSource.value.nodeId, connectSource.value.nodeId, connectSource.value.slot)
+  connectSource.value = null
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -563,6 +581,25 @@ function onKeyDown(e) {
         />
       </template>
     </template>
+
+    <!-- ── sequence self-loop button (shown when source slot is selected) ── -->
+    <g
+      v-if="isSequence && mode === 'connect' && connectSource && connectSourceNode"
+      style="cursor:pointer"
+      @mousedown.stop="onSelfLoop"
+    >
+      <rect
+        :x="seqX(connectSourceNode) + 10"
+        :y="SEQ_MESSAGE_START_Y + connectSource.slot * seqFlowSpacing - 10"
+        width="44" height="20" rx="3"
+        fill="#7c3aed" opacity="0.9"
+      />
+      <text
+        :x="seqX(connectSourceNode) + 32"
+        :y="SEQ_MESSAGE_START_Y + connectSource.slot * seqFlowSpacing + 5"
+        fill="white" font-size="11" text-anchor="middle" pointer-events="none"
+      >↩ Self</text>
+    </g>
 
     <!-- ── edges ── -->
     <g

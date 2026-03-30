@@ -178,7 +178,7 @@ function directionClass(d) {
           <input
             type="number"
             v-model.number="seqFlowSpacing"
-            min="30" max="70"
+            min="30" max="150"
             class="w-14 px-1.5 py-0.5 text-xs bg-gray-700 border border-gray-600 rounded text-gray-200 focus:outline-none focus:border-indigo-400"
           />
         </template>
