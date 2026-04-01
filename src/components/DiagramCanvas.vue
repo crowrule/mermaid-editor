@@ -54,10 +54,12 @@ const SEQ_OFFSET_X = 100
 const SEQ_LIFELINE_TOP = 80
 const SEQ_MESSAGE_START_Y = 110
 // SEQ_MESSAGE_SPACING removed — now driven by seqFlowSpacing prop
+const SEQ_BODY_PADDING = 20  // vertical padding at top of scrollable body SVG
 
 // ── state ────────────────────────────────────────────────────────────────────
 const containerRef = ref(null)
 const svgRef = ref(null)
+const headerSvgRef = ref(null)
 
 // context menu (ER edge type)
 const ctxEdgeId = ref(null)
@@ -129,8 +131,19 @@ function erEntityCenter(node) {
   return { x: node.x, y: node.y + (node.attributes?.length || 0) * 10 }
 }
 
-// ── sequence layout (computed positions, not stored in node) ─────────────────
+// ── sequence layout helpers ───────────────────────────────────────────────────
 const isSequence = computed(() => props.diagramType === 'sequence')
+
+// Height of the scrollable body SVG
+const seqBodyHeight = computed(() =>
+  SEQ_BODY_PADDING + props.seqFlowCount * props.seqFlowSpacing + 40
+)
+// Width shared by header SVG and body SVG
+const seqCanvasWidth = computed(() => {
+  const n = props.nodes.length
+  if (n === 0) return 400
+  return SEQ_OFFSET_X + (n - 1) * SEQ_PARTICIPANT_SPACING + NODE_W + 80
+})
 
 function seqX(node) {
   const idx = props.nodes.indexOf(node)
@@ -138,7 +151,8 @@ function seqX(node) {
 }
 
 function seqMsgY(edge) {
-  return SEQ_MESSAGE_START_Y + (edge.slot ?? 0) * props.seqFlowSpacing
+  // Coordinates are relative to the scrollable body SVG (y=0 = just below header)
+  return SEQ_BODY_PADDING + (edge.slot ?? 0) * props.seqFlowSpacing
 }
 
 function effectiveX(node) {
@@ -299,12 +313,26 @@ function onBgMousedown(e) {
   addingAttrNodeId.value = null
   ctxEdgeId.value = null
 
-  if (props.mode === 'add') {
+  // Sequence: add-node is handled by the sticky header; body clicks only clear state
+  if (props.mode === 'add' && !isSequence.value) {
     const pt = svgPoint(e)
     const MARGIN = 20
     const x = Math.max(NODE_W / 2 + MARGIN, pt.x)
     const y = Math.max(NODE_H / 2 + MARGIN, pt.y)
     emit('add-node', x, y)
+  }
+}
+
+// Called when clicking the sticky sequence header background
+function onHeaderMousedown(e) {
+  selectedId.value = null
+  selectedEdgeId.value = null
+  connectSource.value = null
+  ctxEdgeId.value = null
+  if (props.mode === 'add') {
+    const rect = headerSvgRef.value.getBoundingClientRect()
+    const x = Math.max(NODE_W / 2 + 20, e.clientX - rect.left)
+    emit('add-node', x, 0)
   }
 }
 
@@ -474,10 +502,155 @@ function onKeyDown(e) {
 </script>
 
 <template>
-  <div ref="containerRef" class="w-full h-full" style="position:relative">
+  <div ref="containerRef" class="w-full h-full flex flex-col overflow-hidden" style="position:relative">
+
+  <!-- ── SEQUENCE: sticky header + scrollable body ───────────────────────────── -->
+  <template v-if="isSequence">
+
+    <!-- Fixed header: participant/actor boxes + lifeline stubs -->
+    <div class="flex-shrink-0 overflow-hidden bg-gray-950"
+         :style="{ cursor: mode === 'add' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default' }">
+      <svg ref="headerSvgRef" :width="seqCanvasWidth" :height="SEQ_MESSAGE_START_Y" style="display:block">
+        <rect x="0" y="0" :width="seqCanvasWidth" :height="SEQ_MESSAGE_START_Y"
+              fill="transparent" @mousedown="onHeaderMousedown" />
+        <!-- lifeline stubs (top portion) -->
+        <line v-for="node in nodes" :key="'hlife-' + node.id"
+              :x1="seqX(node)" :y1="SEQ_LIFELINE_TOP"
+              :x2="seqX(node)" :y2="SEQ_MESSAGE_START_Y"
+              stroke="#374151" stroke-dasharray="6 4" stroke-width="1" />
+        <!-- participant / actor nodes -->
+        <g v-for="node in nodes" :key="'hn-' + node.id"
+           :class="['cursor-pointer select-none', mode === 'delete' ? 'cursor-not-allowed' : '']"
+           @mousedown.stop="onNodeDown($event, node)"
+           @dblclick.stop="startEdit(node)">
+          <template v-if="node.type === 'participant'">
+            <rect :x="effectiveX(node) - NODE_W / 2" :y="effectiveY(node) - NODE_H / 2"
+                  :width="NODE_W" :height="NODE_H"
+                  :fill="nodeColor('participant').fill" :stroke="strokeColor(node)" stroke-width="2" />
+          </template>
+          <template v-else-if="node.type === 'actor'">
+            <circle :cx="effectiveX(node)" :cy="effectiveY(node) - 16" r="10"
+                    :fill="nodeColor('actor').fill" :stroke="strokeColor(node)" stroke-width="2" />
+            <line :x1="effectiveX(node)" :y1="effectiveY(node) - 6"
+                  :x2="effectiveX(node)" :y2="effectiveY(node) + 10"
+                  :stroke="nodeColor('actor').stroke" stroke-width="2" />
+            <line :x1="effectiveX(node) - 14" :y1="effectiveY(node)"
+                  :x2="effectiveX(node) + 14" :y2="effectiveY(node)"
+                  :stroke="nodeColor('actor').stroke" stroke-width="2" />
+            <line :x1="effectiveX(node)" :y1="effectiveY(node) + 10"
+                  :x2="effectiveX(node) - 10" :y2="effectiveY(node) + 24"
+                  :stroke="nodeColor('actor').stroke" stroke-width="2" />
+            <line :x1="effectiveX(node)" :y1="effectiveY(node) + 10"
+                  :x2="effectiveX(node) + 10" :y2="effectiveY(node) + 24"
+                  :stroke="nodeColor('actor').stroke" stroke-width="2" />
+          </template>
+          <text v-if="editingNodeId !== node.id"
+                :x="effectiveX(node)" :y="effectiveY(node) + (node.type === 'actor' ? 38 : 5)"
+                fill="#f3f4f6" font-size="13" text-anchor="middle" dominant-baseline="middle"
+                pointer-events="none">{{ node.label }}</text>
+        </g>
+        <!-- empty state hint in header -->
+        <text v-if="nodes.length === 0" x="50%" y="55%"
+              fill="#4b5563" font-size="14" text-anchor="middle" dominant-baseline="middle"
+              pointer-events="none">Add 모드에서 클릭해서 Participant / Actor 추가</text>
+        <!-- inline label editor (participants) -->
+        <foreignObject v-if="editingNodeId !== null"
+          :x="(seqX(nodes.find(n => n.id === editingNodeId)) || 0) - NODE_W / 2"
+          :y="(effectiveY(nodes.find(n => n.id === editingNodeId)) || 0) - 14"
+          :width="NODE_W" height="28">
+          <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+            <input ref="editInputRef" v-model="editLabel"
+                   @keydown.enter.stop="commitEdit"
+                   @keydown.escape.stop="editingNodeId = null"
+                   @blur="commitEdit"
+                   style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #60a5fa;font-size:12px;text-align:center;padding:2px 4px;box-sizing:border-box;outline:none;" />
+          </div>
+        </foreignObject>
+      </svg>
+    </div>
+
+    <!-- Scrollable body: lifelines + slot circles + edges -->
+    <div class="flex-1 overflow-y-auto overflow-x-auto bg-gray-950">
+      <svg ref="svgRef" :width="seqCanvasWidth" :height="seqBodyHeight" style="display:block;outline:none"
+           :style="{ cursor: mode === 'connect' ? 'cell' : 'default' }"
+           tabindex="0"
+           @mousemove="onMouseMove" @mouseup="onMouseUp" @keydown="onKeyDown" @contextmenu.prevent>
+        <defs>
+          <marker id="arrowHead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#60a5fa" />
+          </marker>
+          <marker id="arrowCross" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+            <line x1="0" y1="0" x2="10" y2="10" stroke="#f87171" stroke-width="2"/>
+            <line x1="10" y1="0" x2="0" y2="10" stroke="#f87171" stroke-width="2"/>
+          </marker>
+        </defs>
+        <rect x="0" y="0" :width="seqCanvasWidth" :height="seqBodyHeight"
+              fill="transparent" @mousedown="onBgMousedown" />
+        <!-- lifelines (full body height) -->
+        <line v-for="node in nodes" :key="'life-' + node.id"
+              :x1="seqX(node)" y1="0" :x2="seqX(node)" :y2="seqBodyHeight"
+              stroke="#374151" stroke-dasharray="6 4" stroke-width="1" />
+        <!-- slot circles -->
+        <template v-for="node in nodes" :key="'slots-' + node.id">
+          <circle v-for="si in seqFlowCount" :key="'slot-' + si"
+            :cx="seqX(node)"
+            :cy="SEQ_BODY_PADDING + (si - 1) * seqFlowSpacing"
+            :r="mode === 'connect' ? 6 : 3"
+            :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
+                   ? '#10b981' : (mode === 'connect' ? '#1e3a6e' : '#1f2937')"
+            :stroke="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
+                     ? '#10b981' : (mode === 'connect' ? '#60a5fa' : '#374151')"
+            stroke-width="1.5"
+            :style="mode === 'connect' ? 'cursor:pointer' : 'pointer-events:none'"
+            @mousedown.stop="onSlotClick(node, si - 1)"
+          />
+        </template>
+        <!-- self-loop button -->
+        <g v-if="mode === 'connect' && connectSource && connectSourceNode"
+           style="cursor:pointer" @mousedown.stop="onSelfLoop">
+          <rect :x="seqX(connectSourceNode) + 10"
+                :y="SEQ_BODY_PADDING + connectSource.slot * seqFlowSpacing - 10"
+                width="44" height="20" rx="3" fill="#7c3aed" opacity="0.9" />
+          <text :x="seqX(connectSourceNode) + 32"
+                :y="SEQ_BODY_PADDING + connectSource.slot * seqFlowSpacing + 5"
+                fill="white" font-size="11" text-anchor="middle" pointer-events="none">↩ Self</text>
+        </g>
+        <!-- edges -->
+        <g v-for="edge in edges" :key="'edge-' + edge.id" class="cursor-pointer"
+           @mousedown.stop="onEdgeClick($event, edge)"
+           @dblclick.stop="startEdgeEdit(edge)">
+          <path :d="edgePath(edge)" fill="none"
+                :stroke="selectedEdgeId === edge.id ? '#f59e0b' : '#60a5fa'"
+                stroke-width="2"
+                :stroke-dasharray="edgeStrokeDasharray(edge.edgeType)"
+                :marker-end="edgeMarkerEnd(edge)" />
+          <path :d="edgePath(edge)" fill="none" stroke="transparent" stroke-width="12" />
+          <text v-if="edge.label" :x="edgeMidpoint(edge).x" :y="edgeMidpoint(edge).y"
+                fill="#d1d5db" font-size="11" text-anchor="middle">{{ edge.label }}</text>
+        </g>
+        <!-- edge label editor -->
+        <foreignObject v-if="editingEdge"
+          :x="edgeMidpoint(editingEdge).x - 70" :y="edgeMidpoint(editingEdge).y - 2"
+          width="140" height="26">
+          <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+            <input ref="editEdgeInputRef" v-model="editEdgeLabel"
+                   @keydown.enter.stop="commitEdgeEdit"
+                   @keydown.escape.stop="editingEdgeId = null"
+                   @blur="commitEdgeEdit"
+                   style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:12px;text-align:center;padding:2px 4px;box-sizing:border-box;outline:none;border-radius:3px;" />
+          </div>
+        </foreignObject>
+      </svg>
+    </div>
+
+  </template>
+
+  <!-- ── NON-SEQUENCE: single SVG (flowchart / ER / class) ──────────────────── -->
   <svg
+    v-else
     ref="svgRef"
     class="w-full h-full"
+    style="outline:none"
     :style="{ cursor: mode === 'add' ? 'crosshair' : mode === 'connect' ? 'cell' : 'default' }"
     tabindex="0"
     @mousemove="onMouseMove"
@@ -548,58 +721,6 @@ function onKeyDown(e) {
       fill="transparent"
       @mousedown="onBgMousedown"
     />
-
-    <!-- ── sequence lifelines ── -->
-    <template v-if="isSequence">
-      <line
-        v-for="node in nodes"
-        :key="'life-' + node.id"
-        :x1="seqX(node)" :y1="SEQ_LIFELINE_TOP"
-        :x2="seqX(node)" :y2="SEQ_MESSAGE_START_Y + (seqFlowCount - 1) * seqFlowSpacing + 40"
-        stroke="#374151" stroke-dasharray="6 4" stroke-width="1"
-      />
-    </template>
-
-    <!-- ── sequence flow-slot circles ── -->
-    <template v-if="isSequence && nodes.length > 0">
-      <template v-for="node in nodes" :key="'slots-' + node.id">
-        <circle
-          v-for="si in seqFlowCount"
-          :key="'slot-' + si"
-          :cx="seqX(node)"
-          :cy="SEQ_MESSAGE_START_Y + (si - 1) * seqFlowSpacing"
-          :r="mode === 'connect' ? 6 : 3"
-          :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
-                  ? '#10b981'
-                  : (mode === 'connect' ? '#1e3a6e' : '#1f2937')"
-          :stroke="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
-                    ? '#10b981'
-                    : (mode === 'connect' ? '#60a5fa' : '#374151')"
-          stroke-width="1.5"
-          :style="mode === 'connect' ? 'cursor:pointer' : 'pointer-events:none'"
-          @mousedown.stop="onSlotClick(node, si - 1)"
-        />
-      </template>
-    </template>
-
-    <!-- ── sequence self-loop button (shown when source slot is selected) ── -->
-    <g
-      v-if="isSequence && mode === 'connect' && connectSource && connectSourceNode"
-      style="cursor:pointer"
-      @mousedown.stop="onSelfLoop"
-    >
-      <rect
-        :x="seqX(connectSourceNode) + 10"
-        :y="SEQ_MESSAGE_START_Y + connectSource.slot * seqFlowSpacing - 10"
-        width="44" height="20" rx="3"
-        fill="#7c3aed" opacity="0.9"
-      />
-      <text
-        :x="seqX(connectSourceNode) + 32"
-        :y="SEQ_MESSAGE_START_Y + connectSource.slot * seqFlowSpacing + 5"
-        fill="white" font-size="11" text-anchor="middle" pointer-events="none"
-      >↩ Self</text>
-    </g>
 
     <!-- ── edges ── -->
     <g
