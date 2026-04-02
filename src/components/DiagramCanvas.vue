@@ -422,7 +422,7 @@ function commitEdit() {
 }
 
 function startEdgeEdit(edge) {
-  if (props.mode === 'delete' || props.mode === 'connect') return
+  if (props.mode === 'delete') return
   editingEdgeId.value = edge.id
   editEdgeLabel.value = edge.label || ''
   nextTick(() => editEdgeInputRef.value?.focus())
@@ -592,18 +592,29 @@ function onKeyDown(e) {
               stroke="#374151" stroke-dasharray="6 4" stroke-width="1" />
         <!-- slot circles -->
         <template v-for="node in nodes" :key="'slots-' + node.id">
-          <circle v-for="si in seqFlowCount" :key="'slot-' + si"
-            :cx="seqX(node)"
-            :cy="SEQ_BODY_PADDING + (si - 1) * seqFlowSpacing"
-            :r="mode === 'connect' ? 6 : 3"
-            :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
-                   ? '#10b981' : (mode === 'connect' ? '#1e3a6e' : '#1f2937')"
-            :stroke="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
-                     ? '#10b981' : (mode === 'connect' ? '#60a5fa' : '#374151')"
-            stroke-width="1.5"
-            :style="mode === 'connect' ? 'cursor:pointer' : 'pointer-events:none'"
-            @mousedown.stop="onSlotClick(node, si - 1)"
-          />
+          <g v-for="si in seqFlowCount" :key="'slot-' + si"
+             :style="mode === 'connect' ? 'cursor:pointer' : 'pointer-events:none'"
+             @mousedown.stop="onSlotClick(node, si - 1)">
+            <circle
+              :cx="seqX(node)"
+              :cy="SEQ_BODY_PADDING + (si - 1) * seqFlowSpacing"
+              :r="mode === 'connect' ? 12 : 7"
+              :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
+                     ? '#10b981' : (mode === 'connect' ? '#1e3a6e' : '#1f2937')"
+              :stroke="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
+                       ? '#10b981' : (mode === 'connect' ? '#60a5fa' : '#374151')"
+              stroke-width="1.5"
+            />
+            <text
+              :x="seqX(node)"
+              :y="SEQ_BODY_PADDING + (si - 1) * seqFlowSpacing"
+              text-anchor="middle" dominant-baseline="central"
+              :font-size="mode === 'connect' ? 9 : 7"
+              :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
+                     ? 'white' : (mode === 'connect' ? '#93c5fd' : '#6b7280')"
+              pointer-events="none"
+            >{{ si }}</text>
+          </g>
         </template>
         <!-- self-loop button -->
         <g v-if="mode === 'connect' && connectSource && connectSourceNode"
