@@ -4,6 +4,7 @@ import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 const props = defineProps({
   nodes: { type: Array, required: true },
   edges: { type: Array, required: true },
+  activations: { type: Array, default: () => [] },
   diagramType: { type: String, required: true },
   mode: { type: String, default: 'select' },
   selectedNodeType: { type: String, default: 'process' },
@@ -16,6 +17,7 @@ const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
   'delete-node', 'delete-edge', 'update-node-label', 'update-edge-label',
   'add-attribute', 'delete-attribute', 'update-edge-type',
+  'add-activation', 'delete-activation',
 ])
 
 // Cardinality options for each side of an ER relation
@@ -463,11 +465,24 @@ function onSlotClick(node, slotIdx) {
   if (!connectSource.value) {
     connectSource.value = { nodeId: node.id, slot: slotIdx }
   } else if (connectSource.value.nodeId !== node.id) {
+    // Different lifeline → message edge
     emit('add-edge', connectSource.value.nodeId, node.id, connectSource.value.slot)
     connectSource.value = null
+  } else if (connectSource.value.slot !== slotIdx) {
+    // Same lifeline, different slot → activation range
+    const startSlot = Math.min(connectSource.value.slot, slotIdx)
+    const endSlot   = Math.max(connectSource.value.slot, slotIdx)
+    emit('add-activation', node.id, startSlot, endSlot)
+    connectSource.value = null
   } else {
-    // Same lifeline: re-select this slot position
-    connectSource.value = { nodeId: node.id, slot: slotIdx }
+    // Same lifeline, same slot → cancel selection
+    connectSource.value = null
+  }
+}
+
+function onActivationClick(act) {
+  if (confirm('이 Activation 블록을 삭제하시겠습니까?')) {
+    emit('delete-activation', act.id)
   }
 }
 
@@ -590,6 +605,22 @@ function onKeyDown(e) {
         <line v-for="node in nodes" :key="'life-' + node.id"
               :x1="seqX(node)" y1="0" :x2="seqX(node)" :y2="seqBodyHeight"
               stroke="#374151" stroke-dasharray="6 4" stroke-width="1" />
+        <!-- activation blocks -->
+        <template v-for="act in activations" :key="'act-' + act.id">
+          <g v-if="nodes.find(n => n.id === act.nodeId)"
+             style="cursor:pointer"
+             @mousedown.stop="onActivationClick(act)">
+            <rect
+              :x="seqX(nodes.find(n => n.id === act.nodeId)) - 8"
+              :y="SEQ_BODY_PADDING + act.startSlot * seqFlowSpacing"
+              width="16"
+              :height="(act.endSlot - act.startSlot) * seqFlowSpacing"
+              fill="#4f46e5" fill-opacity="0.6"
+              stroke="#818cf8" stroke-width="1.5"
+              rx="2"
+            />
+          </g>
+        </template>
         <!-- slot circles -->
         <template v-for="node in nodes" :key="'slots-' + node.id">
           <g v-for="si in seqFlowCount" :key="'slot-' + si"

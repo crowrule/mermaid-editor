@@ -8,8 +8,10 @@ import ToolBar from './components/ToolBar.vue'
 
 const diagramType = ref('flowchart')
 const diagramDirection = ref('TD')
+const seqAutoNumber = ref(false)
 const nodes = ref([])
 const edges = ref([])
+const activations = ref([])
 const diagramCode = ref('')
 const rightTab = ref('preview')
 const previewRef = ref(null)
@@ -39,6 +41,7 @@ function cancelDiagramTypeChange() {
 
 let nodeIdCounter = 1
 let edgeIdCounter = 1
+let activationIdCounter = 1
 
 // ── resizable divider ──────────────────────────────────────────────────────────
 const leftPct = ref(60)
@@ -98,17 +101,24 @@ onUnmounted(() => {
 })
 
 // Auto-generate mermaid code whenever visual state changes
-watch([diagramType, diagramDirection, nodes, edges], () => {
-  diagramCode.value = generateCode(diagramType.value, nodes.value, edges.value, { direction: diagramDirection.value })
+watch([diagramType, diagramDirection, seqAutoNumber, nodes, edges, activations], () => {
+  diagramCode.value = generateCode(diagramType.value, nodes.value, edges.value, {
+    direction: diagramDirection.value,
+    autonumber: seqAutoNumber.value,
+    activations: activations.value,
+  })
 }, { deep: true })
 
 // Clear canvas when diagram type changes
 watch(diagramType, () => {
   nodes.value = []
   edges.value = []
+  activations.value = []
   nodeIdCounter = 1
   edgeIdCounter = 1
+  activationIdCounter = 1
   diagramDirection.value = 'TD'
+  seqAutoNumber.value = false
 })
 
 // ── default label per type ────────────────────────────────────────────────────
@@ -199,6 +209,14 @@ function handleUpdateEdgeLabel(id, label) {
   if (edge) edge.label = label
 }
 
+function handleAddActivation(nodeId, startSlot, endSlot) {
+  activations.value.push({ id: activationIdCounter++, nodeId, startSlot, endSlot })
+}
+
+function handleDeleteActivation(id) {
+  activations.value = activations.value.filter(a => a.id !== id)
+}
+
 function handleCodeChange(code) {
   diagramCode.value = code
 }
@@ -236,8 +254,10 @@ function handleCodeChange(code) {
         :style="{ width: leftPct + '%' }"
         :diagram-type="diagramType"
         :diagram-direction="diagramDirection"
+        :seq-auto-number="seqAutoNumber"
         :nodes="nodes"
         :edges="edges"
+        :activations="activations"
         @add-node="handleAddNode"
         @move-node="handleMoveNode"
         @add-edge="handleAddEdge"
@@ -249,6 +269,9 @@ function handleCodeChange(code) {
         @delete-attribute="handleDeleteAttribute"
         @update-edge-type="handleUpdateEdgeType"
         @update:diagram-direction="diagramDirection = $event"
+        @update:seq-auto-number="seqAutoNumber = $event"
+        @add-activation="handleAddActivation"
+        @delete-activation="handleDeleteActivation"
       />
 
       <!-- Draggable divider -->

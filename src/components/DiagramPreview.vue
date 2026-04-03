@@ -39,6 +39,42 @@ async function renderDiagram(code) {
     const id = `mermaid-diagram-${++renderCount}`
     const { svg } = await m.render(id, code)
     containerRef.value.innerHTML = svg
+    if (code.trim().startsWith('sequenceDiagram')) {
+      const svgEl = containerRef.value.querySelector('svg')
+      if (svgEl) {
+        const SHIFT = 20
+        // rect.actor 중 y값이 높은 쪽이 bottom actor
+        const actorRects = [...svgEl.querySelectorAll('rect.actor')]
+        if (actorRects.length >= 2) {
+          const yVals = actorRects.map(r => parseFloat(r.getAttribute('y') || '0'))
+          const midY = (Math.min(...yVals) + Math.max(...yVals)) / 2
+          const moved = new Set()
+          actorRects
+            .filter(r => parseFloat(r.getAttribute('y') || '0') > midY)
+            .forEach(r => {
+              const g = r.parentElement
+              if (g && !moved.has(g)) {
+                moved.add(g)
+                const t = g.getAttribute('transform') || ''
+                const m = t.match(/translate\(\s*([^,]+),\s*([^)]+)\)/)
+                if (m) {
+                  g.setAttribute('transform', t.replace(m[0], `translate(${m[1]}, ${parseFloat(m[2]) + SHIFT})`))
+                } else {
+                  g.setAttribute('transform', (t + ` translate(0, ${SHIFT})`).trim())
+                }
+              }
+            })
+          // lifeline y2도 SHIFT만큼 연장
+          svgEl.querySelectorAll('line.actor-line').forEach(line => {
+            const y2 = parseFloat(line.getAttribute('y2') || '0')
+            line.setAttribute('y2', y2 + SHIFT)
+          })
+          // viewBox를 SHIFT만큼 늘려 잘리지 않게
+          const vb = svgEl.viewBox.baseVal
+          if (vb.width) svgEl.setAttribute('viewBox', `${vb.x} ${vb.y} ${vb.width} ${vb.height + SHIFT}`)
+        }
+      }
+    }
     renderError.value = ''
   } catch (err) {
     renderError.value = err.message ?? 'Diagram syntax error'

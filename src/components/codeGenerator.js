@@ -63,9 +63,10 @@ function generateFlowchart(nodes, edges, direction) {
   return lines.join('\n')
 }
 
-function generateSequence(nodes, edges) {
+function generateSequence(nodes, edges, autonumber, activations = []) {
   if (nodes.length === 0) return 'sequenceDiagram'
   const lines = ['sequenceDiagram']
+  if (autonumber) lines.push('  autonumber')
   // Sort participants by x position for display order
   const sorted = [...nodes].sort((a, b) => a.x - b.x)
   // Use letter IDs (A, B, C...) to avoid keyword conflicts with labels like "Participant"/"Actor"
@@ -76,20 +77,34 @@ function generateSequence(nodes, edges) {
     const keyword = node.type === 'actor' ? 'actor' : 'participant'
     lines.push(`  ${keyword} ${id} as ${node.label}`)
   })
-  // Sort messages by slot position (visual order), fallback to creation id
-  const sortedEdges = [...edges].sort((a, b) => (a.slot ?? a.id) - (b.slot ?? b.id))
-  sortedEdges.forEach(edge => {
-    const fromId = idMap.get(edge.from)
-    const toId   = idMap.get(edge.to)
-    if (!fromId || !toId) return
-    const label = edge.label || (edge.slot !== undefined ? String(edge.slot + 1) : 'message')
-    let arrow
-    switch (edge.edgeType) {
-      case 'dotted': arrow = '-->>'; break
-      case 'cross':  arrow = '-x';   break
-      default:       arrow = '->>'; break
+  // Build unified event list: messages + activation boundaries ordered by slot
+  const events = []
+  edges.forEach(edge => {
+    events.push({ type: 'message', slot: edge.slot ?? edge.id, edge })
+  })
+  activations.forEach(act => {
+    events.push({ type: 'activate',   slot: act.startSlot + 0.5, nodeId: act.nodeId })
+    events.push({ type: 'deactivate', slot: act.endSlot   + 0.5, nodeId: act.nodeId })
+  })
+  events.sort((a, b) => a.slot - b.slot)
+  events.forEach(ev => {
+    if (ev.type === 'activate' || ev.type === 'deactivate') {
+      const id = idMap.get(ev.nodeId)
+      if (id) lines.push(`  ${ev.type} ${id}`)
+    } else {
+      const { edge } = ev
+      const fromId = idMap.get(edge.from)
+      const toId   = idMap.get(edge.to)
+      if (!fromId || !toId) return
+      const label = edge.label || (edge.slot !== undefined ? String(edge.slot + 1) : 'message')
+      let arrow
+      switch (edge.edgeType) {
+        case 'dotted': arrow = '-->>'; break
+        case 'cross':  arrow = '-x';   break
+        default:       arrow = '->>'; break
+      }
+      lines.push(`  ${fromId}${arrow}${toId}: ${label}`)
     }
-    lines.push(`  ${fromId}${arrow}${toId}: ${label}`)
   })
   return lines.join('\n')
 }
@@ -161,7 +176,7 @@ function generateClass(nodes, edges, direction) {
 export function generateCode(type, nodes, edges, options) {
   const dir = options?.direction
   switch (type) {
-    case 'sequence': return generateSequence(nodes, edges)
+    case 'sequence': return generateSequence(nodes, edges, options?.autonumber, options?.activations)
     case 'er':       return generateER(nodes, edges, dir)
     case 'class':    return generateClass(nodes, edges, dir)
     default:         return generateFlowchart(nodes, edges, dir)

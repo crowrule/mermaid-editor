@@ -5,15 +5,18 @@ import DiagramCanvas from './DiagramCanvas.vue'
 const props = defineProps({
   diagramType: { type: String, required: true },
   diagramDirection: { type: String, default: 'TD' },
+  seqAutoNumber: { type: Boolean, default: false },
   nodes: { type: Array, required: true },
   edges: { type: Array, required: true },
+  activations: { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
   'delete-node', 'delete-edge', 'update-label', 'update-edge-label',
   'add-attribute', 'delete-attribute', 'update-edge-type',
-  'update:diagramDirection',
+  'update:diagramDirection', 'update:seqAutoNumber',
+  'add-activation', 'delete-activation',
 ])
 
 const mode = ref('add')
@@ -167,6 +170,16 @@ function directionClass(d) {
         <!-- sequence flow settings -->
         <template v-if="diagramType === 'sequence'">
           <div class="w-px h-5 self-center bg-gray-600" />
+          <label class="flex items-center gap-1.5 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              :checked="seqAutoNumber"
+              @change="emit('update:seqAutoNumber', $event.target.checked)"
+              class="w-3.5 h-3.5 accent-indigo-400 cursor-pointer"
+            />
+            <span class="text-xs text-gray-300">Numbering</span>
+          </label>
+          <div class="w-px h-5 self-center bg-gray-600" />
           <span class="text-xs text-gray-400">Flows</span>
           <input
             type="number"
@@ -227,6 +240,7 @@ function directionClass(d) {
       <DiagramCanvas
         :nodes="nodes"
         :edges="edges"
+        :activations="activations"
         :diagram-type="diagramType"
         :mode="mode"
         :selected-node-type="selectedNodeType"
@@ -243,6 +257,8 @@ function directionClass(d) {
         @add-attribute="onAddAttribute"
         @delete-attribute="onDeleteAttribute"
         @update-edge-type="onUpdateEdgeType"
+        @add-activation="(nodeId, s, e) => emit('add-activation', nodeId, s, e)"
+        @delete-activation="(id) => emit('delete-activation', id)"
       />
     </div>
   </div>
