@@ -459,13 +459,19 @@ function commitEdgeEdit() {
   }
 }
 
+// ── occupied slots (sequence) ─────────────────────────────────────────────────
+const occupiedSlots = computed(() =>
+  new Set(props.edges.filter(e => e.slot !== undefined).map(e => e.slot))
+)
+
 // ── sequence slot circle click ────────────────────────────────────────────────
 function onSlotClick(node, slotIdx) {
   if (props.mode !== 'connect') return
   if (!connectSource.value) {
     connectSource.value = { nodeId: node.id, slot: slotIdx }
   } else if (connectSource.value.nodeId !== node.id) {
-    // Different lifeline → message edge
+    // Different lifeline → block if source slot already has a flow
+    if (occupiedSlots.value.has(connectSource.value.slot)) return
     emit('add-edge', connectSource.value.nodeId, node.id, connectSource.value.slot)
     connectSource.value = null
   } else if (connectSource.value.slot !== slotIdx) {
@@ -631,9 +637,15 @@ function onKeyDown(e) {
               :cy="SEQ_BODY_PADDING + (si - 1) * seqFlowSpacing"
               :r="mode === 'connect' ? 12 : 7"
               :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
-                     ? '#10b981' : (mode === 'connect' ? '#1e3a6e' : '#1f2937')"
+                     ? '#10b981'
+                     : mode === 'connect' && occupiedSlots.has(si - 1)
+                       ? '#78350f'
+                       : (mode === 'connect' ? '#1e3a6e' : '#1f2937')"
               :stroke="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
-                       ? '#10b981' : (mode === 'connect' ? '#60a5fa' : '#374151')"
+                       ? '#10b981'
+                       : mode === 'connect' && occupiedSlots.has(si - 1)
+                         ? '#f59e0b'
+                         : (mode === 'connect' ? '#60a5fa' : '#374151')"
               stroke-width="1.5"
             />
             <text
@@ -642,7 +654,10 @@ function onKeyDown(e) {
               text-anchor="middle" dominant-baseline="central"
               :font-size="mode === 'connect' ? 9 : 7"
               :fill="connectSource && connectSource.nodeId === node.id && connectSource.slot === si - 1
-                     ? 'white' : (mode === 'connect' ? '#93c5fd' : '#6b7280')"
+                     ? 'white'
+                     : mode === 'connect' && occupiedSlots.has(si - 1)
+                       ? '#fcd34d'
+                       : (mode === 'connect' ? '#93c5fd' : '#6b7280')"
               pointer-events="none"
             >{{ si }}</text>
           </g>
