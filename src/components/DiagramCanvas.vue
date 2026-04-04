@@ -463,6 +463,10 @@ function commitEdgeEdit() {
   }
 }
 
+function seqEdgeLabel(edge) {
+  return edge.label || (edge.slot !== undefined ? `msg-${edge.slot + 1}` : 'message')
+}
+
 // ── slot insert context menu ──────────────────────────────────────────────────
 const slotCtxVisible = ref(false)
 const slotCtxX = ref(0)
@@ -711,8 +715,8 @@ function onKeyDown(e) {
                 :stroke-dasharray="edgeStrokeDasharray(edge.edgeType)"
                 :marker-end="edgeMarkerEnd(edge)" />
           <path :d="edgePath(edge)" fill="none" stroke="transparent" stroke-width="12" />
-          <text v-if="edge.label" :x="edgeMidpoint(edge).x" :y="edgeMidpoint(edge).y"
-                fill="#d1d5db" font-size="11" text-anchor="middle">{{ edge.label }}</text>
+          <text :x="edgeMidpoint(edge).x" :y="edgeMidpoint(edge).y"
+                fill="#d1d5db" font-size="11" text-anchor="middle">{{ seqEdgeLabel(edge) }}</text>
         </g>
         <!-- edge label editor -->
         <foreignObject v-if="editingEdge"

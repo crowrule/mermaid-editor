@@ -96,7 +96,7 @@ function generateSequence(nodes, edges, autonumber, activations = []) {
       const fromId = idMap.get(edge.from)
       const toId   = idMap.get(edge.to)
       if (!fromId || !toId) return
-      const label = edge.label || (edge.slot !== undefined ? String(edge.slot + 1) : 'message')
+      const label = edge.label || (edge.slot !== undefined ? `msg-${edge.slot + 1}` : 'message')
       let arrow
       switch (edge.edgeType) {
         case 'dotted': arrow = '-->>'; break
