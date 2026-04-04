@@ -209,6 +209,17 @@ function handleUpdateEdgeLabel(id, label) {
   if (edge) edge.label = label
 }
 
+function handleInsertSlot(slotIdx, position) {
+  const insertAt = position === 'above' ? slotIdx : slotIdx + 1
+  edges.value.forEach(edge => {
+    if (edge.slot !== undefined && edge.slot >= insertAt) edge.slot += 1
+  })
+  activations.value.forEach(act => {
+    if (act.startSlot >= insertAt) act.startSlot += 1
+    if (act.endSlot >= insertAt)   act.endSlot   += 1
+  })
+}
+
 function handleAddActivation(nodeId, startSlot, endSlot) {
   activations.value.push({ id: activationIdCounter++, nodeId, startSlot, endSlot })
 }
@@ -272,6 +283,7 @@ function handleCodeChange(code) {
         @update:seq-auto-number="seqAutoNumber = $event"
         @add-activation="handleAddActivation"
         @delete-activation="handleDeleteActivation"
+        @insert-slot="handleInsertSlot"
       />
 
       <!-- Draggable divider -->

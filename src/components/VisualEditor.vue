@@ -17,6 +17,7 @@ const emit = defineEmits([
   'add-attribute', 'delete-attribute', 'update-edge-type',
   'update:diagramDirection', 'update:seqAutoNumber',
   'add-activation', 'delete-activation',
+  'insert-slot',
 ])
 
 const mode = ref('add')
@@ -114,6 +115,10 @@ function onUpdateEdgeLabel(id, label) { emit('update-edge-label', id, label) }
 function onAddAttribute(nodeId, dataType, name) { emit('add-attribute', nodeId, dataType, name) }
 function onDeleteAttribute(nodeId, index) { emit('delete-attribute', nodeId, index) }
 function onUpdateEdgeType(id, edgeType) { emit('update-edge-type', id, edgeType) }
+function onInsertSlot(slotIdx, position) {
+  seqFlowCount.value += 1
+  emit('insert-slot', slotIdx, position)
+}
 
 // ── button class helpers ──────────────────────────────────────────────────────
 function modeClass(m) {
@@ -259,6 +264,7 @@ function directionClass(d) {
         @update-edge-type="onUpdateEdgeType"
         @add-activation="(nodeId, s, e) => emit('add-activation', nodeId, s, e)"
         @delete-activation="(id) => emit('delete-activation', id)"
+        @insert-slot="onInsertSlot"
       />
     </div>
   </div>

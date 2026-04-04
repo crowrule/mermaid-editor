@@ -18,6 +18,7 @@ const emit = defineEmits([
   'delete-node', 'delete-edge', 'update-node-label', 'update-edge-label',
   'add-attribute', 'delete-attribute', 'update-edge-type',
   'add-activation', 'delete-activation',
+  'insert-slot',
 ])
 
 // Cardinality options for each side of an ER relation
@@ -75,8 +76,10 @@ const ctxFromNode = computed(() => ctxEdge.value ? props.nodes.find(n => n.id ==
 const ctxToNode   = computed(() => ctxEdge.value ? props.nodes.find(n => n.id === ctxEdge.value.to)   : null)
 // Close menu when clicking outside the canvas container
 function onDocMousedown(e) {
-  if (containerRef.value && !containerRef.value.contains(e.target))
+  if (containerRef.value && !containerRef.value.contains(e.target)) {
     ctxEdgeId.value = null
+    slotCtxVisible.value = false
+  }
 }
 onMounted(() => document.addEventListener('mousedown', onDocMousedown))
 onUnmounted(() => document.removeEventListener('mousedown', onDocMousedown))
@@ -314,6 +317,7 @@ function onBgMousedown(e) {
   connectSource.value = null
   addingAttrNodeId.value = null
   ctxEdgeId.value = null
+  slotCtxVisible.value = false
 
   // Sequence: add-node is handled by the sticky header; body clicks only clear state
   if (props.mode === 'add' && !isSequence.value) {
@@ -457,6 +461,31 @@ function commitEdgeEdit() {
     emit('update-edge-label', editingEdgeId.value, editEdgeLabel.value)
     editingEdgeId.value = null
   }
+}
+
+// ── slot insert context menu ──────────────────────────────────────────────────
+const slotCtxVisible = ref(false)
+const slotCtxX = ref(0)
+const slotCtxY = ref(0)
+const slotCtxSlot = ref(0)
+
+function onSlotDown(event, node, slotIdx) {
+  if (props.mode === 'select') {
+    const rect = containerRef.value.getBoundingClientRect()
+    slotCtxX.value = event.clientX - rect.left + 8
+    slotCtxY.value = event.clientY - rect.top + 8
+    slotCtxSlot.value = slotIdx
+    slotCtxVisible.value = true
+    return
+  }
+  if (props.mode === 'connect') {
+    onSlotClick(node, slotIdx)
+  }
+}
+
+function slotInsert(position) {
+  emit('insert-slot', slotCtxSlot.value, position)
+  slotCtxVisible.value = false
 }
 
 // ── occupied slots (sequence) ─────────────────────────────────────────────────
@@ -630,8 +659,8 @@ function onKeyDown(e) {
         <!-- slot circles -->
         <template v-for="node in nodes" :key="'slots-' + node.id">
           <g v-for="si in seqFlowCount" :key="'slot-' + si"
-             :style="mode === 'connect' ? 'cursor:pointer' : 'pointer-events:none'"
-             @mousedown.stop="onSlotClick(node, si - 1)">
+             :style="(mode === 'connect' || mode === 'select') ? 'cursor:pointer' : 'pointer-events:none'"
+             @mousedown.stop="onSlotDown($event, node, si - 1)">
             <circle
               :cx="seqX(node)"
               :cy="SEQ_BODY_PADDING + (si - 1) * seqFlowSpacing"
@@ -1180,6 +1209,27 @@ function onKeyDown(e) {
       <code class="w-6 text-center font-mono text-xs opacity-75">{{ opt.value }}</code>
       <span>{{ opt.label }}</span>
     </div>
+  </div>
+
+  <!-- slot insert context menu -->
+  <div
+    v-if="slotCtxVisible"
+    class="absolute z-50 overflow-hidden rounded shadow-xl border border-gray-600 text-xs"
+    style="background:#1e293b; min-width:120px"
+    :style="{ left: slotCtxX + 'px', top: slotCtxY + 'px' }"
+    @mousedown.stop
+  >
+    <div class="px-3 py-1.5 text-gray-400 border-b border-gray-700 select-none">
+      Slot {{ slotCtxSlot + 1 }}
+    </div>
+    <button
+      class="flex w-full items-center gap-2 px-3 py-2 text-gray-200 hover:bg-gray-700 transition-colors"
+      @mousedown.stop="slotInsert('above')"
+    >↑ 위에 추가</button>
+    <button
+      class="flex w-full items-center gap-2 px-3 py-2 text-gray-200 hover:bg-gray-700 transition-colors"
+      @mousedown.stop="slotInsert('below')"
+    >↓ 아래에 추가</button>
   </div>
 
   </div>
