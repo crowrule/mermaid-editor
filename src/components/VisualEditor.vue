@@ -3,12 +3,13 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import DiagramCanvas from './DiagramCanvas.vue'
 
 const props = defineProps({
-  diagramType: { type: String, required: true },
+  diagramType:      { type: String, required: true },
   diagramDirection: { type: String, default: 'TD' },
-  seqAutoNumber: { type: Boolean, default: false },
-  nodes: { type: Array, required: true },
-  edges: { type: Array, required: true },
+  seqAutoNumber:    { type: Boolean, default: false },
+  nodes:       { type: Array, required: true },
+  edges:       { type: Array, required: true },
   activations: { type: Array, default: () => [] },
+  regions:     { type: Array, default: () => [] },
 })
 
 const emit = defineEmits([
@@ -18,6 +19,7 @@ const emit = defineEmits([
   'update:diagramDirection', 'update:seqAutoNumber',
   'add-activation', 'delete-activation',
   'insert-slot',
+  'add-region', 'update-region', 'delete-region',
 ])
 
 const mode = ref('add')
@@ -119,6 +121,9 @@ function onInsertSlot(slotIdx, position) {
   seqFlowCount.value += 1
   emit('insert-slot', slotIdx, position)
 }
+function onAddRegion(startSlot, endSlot, type, label) { emit('add-region', startSlot, endSlot, type, label) }
+function onUpdateRegion(id, updates) { emit('update-region', id, updates) }
+function onDeleteRegion(id) { emit('delete-region', id) }
 
 // ── button class helpers ──────────────────────────────────────────────────────
 function modeClass(m) {
@@ -246,6 +251,7 @@ function directionClass(d) {
         :nodes="nodes"
         :edges="edges"
         :activations="activations"
+        :regions="regions"
         :diagram-type="diagramType"
         :mode="mode"
         :selected-node-type="selectedNodeType"
@@ -265,6 +271,9 @@ function directionClass(d) {
         @add-activation="(nodeId, s, e) => emit('add-activation', nodeId, s, e)"
         @delete-activation="(id) => emit('delete-activation', id)"
         @insert-slot="onInsertSlot"
+        @add-region="onAddRegion"
+        @update-region="onUpdateRegion"
+        @delete-region="onDeleteRegion"
       />
     </div>
   </div>

@@ -63,7 +63,7 @@ function generateFlowchart(nodes, edges, direction) {
   return lines.join('\n')
 }
 
-function generateSequence(nodes, edges, autonumber, activations = []) {
+function generateSequence(nodes, edges, autonumber, activations = [], regions = []) {
   if (nodes.length === 0) return 'sequenceDiagram'
   const lines = ['sequenceDiagram']
   if (autonumber) lines.push('  autonumber')
@@ -86,11 +86,24 @@ function generateSequence(nodes, edges, autonumber, activations = []) {
     events.push({ type: 'activate',   slot: act.startSlot + 0.5, nodeId: act.nodeId })
     events.push({ type: 'deactivate', slot: act.endSlot   + 0.5, nodeId: act.nodeId })
   })
+  regions.forEach(region => {
+    events.push({ type: 'region-start', slot: region.startSlot - 0.5, region })
+    events.push({ type: 'region-end',   slot: region.endSlot   + 0.5, regionId: region.id })
+  })
   events.sort((a, b) => a.slot - b.slot)
   events.forEach(ev => {
     if (ev.type === 'activate' || ev.type === 'deactivate') {
       const id = idMap.get(ev.nodeId)
       if (id) lines.push(`  ${ev.type} ${id}`)
+    } else if (ev.type === 'region-start') {
+      const { region } = ev
+      if (region.type === 'rect') {
+        lines.push(`  rect rgb(0, 179, 179)`)
+      } else {
+        lines.push(`  ${region.type} ${region.label || region.type}`)
+      }
+    } else if (ev.type === 'region-end') {
+      lines.push(`  end`)
     } else {
       const { edge } = ev
       const fromId = idMap.get(edge.from)
@@ -176,7 +189,7 @@ function generateClass(nodes, edges, direction) {
 export function generateCode(type, nodes, edges, options) {
   const dir = options?.direction
   switch (type) {
-    case 'sequence': return generateSequence(nodes, edges, options?.autonumber, options?.activations)
+    case 'sequence': return generateSequence(nodes, edges, options?.autonumber, options?.activations, options?.regions)
     case 'er':       return generateER(nodes, edges, dir)
     case 'class':    return generateClass(nodes, edges, dir)
     default:         return generateFlowchart(nodes, edges, dir)

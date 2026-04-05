@@ -12,6 +12,7 @@ const seqAutoNumber = ref(false)
 const nodes = ref([])
 const edges = ref([])
 const activations = ref([])
+const regions    = ref([])
 const diagramCode = ref('')
 const rightTab = ref('preview')
 const previewRef = ref(null)
@@ -42,6 +43,7 @@ function cancelDiagramTypeChange() {
 let nodeIdCounter = 1
 let edgeIdCounter = 1
 let activationIdCounter = 1
+let regionIdCounter    = 1
 
 // ── resizable divider ──────────────────────────────────────────────────────────
 const leftPct = ref(60)
@@ -101,24 +103,27 @@ onUnmounted(() => {
 })
 
 // Auto-generate mermaid code whenever visual state changes
-watch([diagramType, diagramDirection, seqAutoNumber, nodes, edges, activations], () => {
+watch([diagramType, diagramDirection, seqAutoNumber, nodes, edges, activations, regions], () => {
   diagramCode.value = generateCode(diagramType.value, nodes.value, edges.value, {
-    direction: diagramDirection.value,
-    autonumber: seqAutoNumber.value,
+    direction:   diagramDirection.value,
+    autonumber:  seqAutoNumber.value,
     activations: activations.value,
+    regions:     regions.value,
   })
 }, { deep: true })
 
 // Clear canvas when diagram type changes
 watch(diagramType, () => {
-  nodes.value = []
-  edges.value = []
+  nodes.value       = []
+  edges.value       = []
   activations.value = []
-  nodeIdCounter = 1
-  edgeIdCounter = 1
+  regions.value     = []
+  nodeIdCounter       = 1
+  edgeIdCounter       = 1
   activationIdCounter = 1
+  regionIdCounter     = 1
   diagramDirection.value = 'TD'
-  seqAutoNumber.value = false
+  seqAutoNumber.value    = false
 })
 
 // ── default label per type ────────────────────────────────────────────────────
@@ -216,8 +221,25 @@ function handleInsertSlot(slotIdx, position) {
   })
   activations.value.forEach(act => {
     if (act.startSlot >= insertAt) act.startSlot += 1
-    if (act.endSlot >= insertAt)   act.endSlot   += 1
+    if (act.endSlot   >= insertAt) act.endSlot   += 1
   })
+  regions.value.forEach(region => {
+    if (region.startSlot >= insertAt) region.startSlot += 1
+    if (region.endSlot   >= insertAt) region.endSlot   += 1
+  })
+}
+
+function handleAddRegion(startSlot, endSlot, type, label) {
+  regions.value.push({ id: regionIdCounter++, type, startSlot, endSlot, label: label ?? 'what is this?' })
+}
+
+function handleUpdateRegion(id, updates) {
+  const region = regions.value.find(r => r.id === id)
+  if (region) Object.assign(region, updates)
+}
+
+function handleDeleteRegion(id) {
+  regions.value = regions.value.filter(r => r.id !== id)
 }
 
 function handleAddActivation(nodeId, startSlot, endSlot) {
@@ -269,6 +291,7 @@ function handleCodeChange(code) {
         :nodes="nodes"
         :edges="edges"
         :activations="activations"
+        :regions="regions"
         @add-node="handleAddNode"
         @move-node="handleMoveNode"
         @add-edge="handleAddEdge"
@@ -284,6 +307,9 @@ function handleCodeChange(code) {
         @add-activation="handleAddActivation"
         @delete-activation="handleDeleteActivation"
         @insert-slot="handleInsertSlot"
+        @add-region="handleAddRegion"
+        @update-region="handleUpdateRegion"
+        @delete-region="handleDeleteRegion"
       />
 
       <!-- Draggable divider -->

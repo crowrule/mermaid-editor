@@ -2,11 +2,12 @@
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
 
 const props = defineProps({
-  nodes: { type: Array, required: true },
-  edges: { type: Array, required: true },
+  nodes:       { type: Array, required: true },
+  edges:       { type: Array, required: true },
   activations: { type: Array, default: () => [] },
-  diagramType: { type: String, required: true },
-  mode: { type: String, default: 'select' },
+  regions:     { type: Array, default: () => [] },
+  diagramType:      { type: String, required: true },
+  mode:             { type: String, default: 'select' },
   selectedNodeType: { type: String, default: 'process' },
   selectedEdgeType: { type: String, default: 'arrow' },
   seqFlowCount:   { type: Number, default: 10 },
@@ -19,6 +20,7 @@ const emit = defineEmits([
   'add-attribute', 'delete-attribute', 'update-edge-type',
   'add-activation', 'delete-activation',
   'insert-slot',
+  'add-region', 'update-region', 'delete-region',
 ])
 
 // Cardinality options for each side of an ER relation
@@ -47,6 +49,20 @@ function parseERSides(edgeType) {
     case 'strict-1:N': return { left: '||', right: '|{' }
     default:           return { left: '||', right: 'o{' }
   }
+}
+
+// ── region types ─────────────────────────────────────────────────────────────
+const REGION_TYPES = [
+  { type: 'rect',     label: 'rect',     fill: '#042f2e', stroke: '#2dd4bf' },
+  { type: 'alt',      label: 'alt',      fill: '#2e1065', stroke: '#a78bfa' },
+  { type: 'par',      label: 'par',      fill: '#1e3a8a', stroke: '#60a5fa' },
+  { type: 'critical', label: 'critical', fill: '#7f1d1d', stroke: '#f87171' },
+  { type: 'break',    label: 'break',    fill: '#431407', stroke: '#fb923c' },
+  { type: 'opt',      label: 'opt',      fill: '#14532d', stroke: '#4ade80' },
+  { type: 'loop',     label: 'loop',     fill: '#164e63', stroke: '#22d3ee' },
+]
+function regionTypeInfo(type) {
+  return REGION_TYPES.find(r => r.type === type) ?? REGION_TYPES[0]
 }
 
 // ── constants ────────────────────────────────────────────────────────────────
@@ -79,10 +95,53 @@ function onDocMousedown(e) {
   if (containerRef.value && !containerRef.value.contains(e.target)) {
     ctxEdgeId.value = null
     slotCtxVisible.value = false
+    regionMenu.value = null
   }
 }
-onMounted(() => document.addEventListener('mousedown', onDocMousedown))
-onUnmounted(() => document.removeEventListener('mousedown', onDocMousedown))
+function onGlobalMousemove(e) {
+  if (regionDragStartSlot < 0) return
+  if (!svgRef.value) return
+  if (!regionDragStarted) {
+    if (Math.abs(e.clientY - regionDragStartY) > 8) regionDragStarted = true
+    else return
+  }
+  const rect = svgRef.value.getBoundingClientRect()
+  const y = e.clientY - rect.top
+  const currentSlot = Math.max(0, Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing))
+  const startSlot = Math.min(regionDragStartSlot, currentSlot)
+  const endSlot   = Math.max(regionDragStartSlot, currentSlot)
+  regionDragPreview.value = { startSlot, endSlot }
+}
+
+function onGlobalMouseup(e) {
+  if (regionDragStartSlot < 0) return
+  if (regionDragStarted && regionDragPreview.value) {
+    const { startSlot, endSlot } = regionDragPreview.value
+    const rect = containerRef.value.getBoundingClientRect()
+    regionMenu.value = {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      startSlot,
+      endSlot,
+      targetRegionId: null,
+    }
+  }
+  regionDragPreview.value = null
+  regionDragStartSlot = -1
+  regionDragStartY    = 0
+  regionDragStarted   = false
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocMousedown)
+  document.addEventListener('mousemove', onGlobalMousemove)
+  document.addEventListener('mouseup',   onGlobalMouseup)
+})
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocMousedown)
+  document.removeEventListener('mousemove', onGlobalMousemove)
+  document.removeEventListener('mouseup',   onGlobalMouseup)
+})
 const selectedId = ref(null)
 const selectedEdgeId = ref(null)
 const connectSource = ref(null)
@@ -113,6 +172,16 @@ const newAttrNameInputRef = ref(null)
 const editingEdgeId = ref(null)
 const editEdgeLabel = ref('')
 const editEdgeInputRef = ref(null)
+
+// ── region drag + menu state ──────────────────────────────────────────────────
+const regionDragPreview  = ref(null)   // { startSlot, endSlot } while dragging
+const regionMenu         = ref(null)   // { x, y, startSlot, endSlot, targetRegionId }
+const editingRegionId    = ref(null)
+const editRegionLabel    = ref('')
+const editRegionLabelRef = ref(null)
+let regionDragStartSlot  = -1
+let regionDragStartY     = 0
+let regionDragStarted    = false
 const editingEdge = computed(() =>
   editingEdgeId.value !== null
     ? props.edges.find(e => e.id === editingEdgeId.value) ?? null
@@ -318,6 +387,17 @@ function onBgMousedown(e) {
   addingAttrNodeId.value = null
   ctxEdgeId.value = null
   slotCtxVisible.value = false
+  regionMenu.value = null
+
+  // Sequence + select: start region drag
+  if (isSequence.value && props.mode === 'select') {
+    const rect = svgRef.value.getBoundingClientRect()
+    const y = e.clientY - rect.top
+    regionDragStartSlot = Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing)
+    regionDragStartY    = e.clientY
+    regionDragStarted   = false
+    return
+  }
 
   // Sequence: add-node is handled by the sticky header; body clicks only clear state
   if (props.mode === 'add' && !isSequence.value) {
@@ -531,6 +611,60 @@ function onSelfLoop() {
   connectSource.value = null
 }
 
+// ── region functions ──────────────────────────────────────────────────────────
+function onRegionMenuSelect(type) {
+  if (!regionMenu.value) return
+  if (regionMenu.value.targetRegionId !== null) {
+    emit('update-region', regionMenu.value.targetRegionId, { type })
+  } else {
+    emit('add-region', regionMenu.value.startSlot, regionMenu.value.endSlot, type, '')
+  }
+  regionMenu.value = null
+}
+
+function onRegionTypeClick(region, e) {
+  e.stopPropagation()
+  if (props.mode === 'delete') return
+  const rect = containerRef.value.getBoundingClientRect()
+  regionMenu.value = {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top,
+    startSlot:      region.startSlot,
+    endSlot:        region.endSlot,
+    targetRegionId: region.id,
+  }
+}
+
+function onRegionClick(region, e) {
+  if (props.mode === 'delete') {
+    e.stopPropagation()
+    if (confirm('이 구역을 삭제하시겠습니까?')) {
+      emit('delete-region', region.id)
+    }
+  }
+}
+
+function startRegionLabelEdit(region) {
+  if (props.mode === 'delete') return
+  editingRegionId.value = region.id
+  editRegionLabel.value = region.label || ''
+  nextTick(() => editRegionLabelRef.value?.focus())
+}
+
+function commitRegionLabel() {
+  if (editingRegionId.value !== null) {
+    emit('update-region', editingRegionId.value, { label: editRegionLabel.value })
+    editingRegionId.value = null
+  }
+}
+
+function regionY(region) {
+  return SEQ_BODY_PADDING + region.startSlot * props.seqFlowSpacing - props.seqFlowSpacing / 2
+}
+function regionHeight(region) {
+  return (region.endSlot - region.startSlot + 1) * props.seqFlowSpacing
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -546,11 +680,13 @@ function onKeyDown(e) {
     }
   }
   if (e.key === 'Escape') {
-    connectSource.value = null
-    editingNodeId.value = null
-    editingEdgeId.value = null
+    connectSource.value    = null
+    editingNodeId.value    = null
+    editingEdgeId.value    = null
+    editingRegionId.value  = null
     addingAttrNodeId.value = null
-    ctxEdgeId.value = null
+    ctxEdgeId.value        = null
+    regionMenu.value       = null
   }
 }
 </script>
@@ -644,6 +780,73 @@ function onKeyDown(e) {
         <line v-for="node in nodes" :key="'life-' + node.id"
               :x1="seqX(node)" y1="0" :x2="seqX(node)" :y2="seqBodyHeight"
               stroke="#374151" stroke-dasharray="6 4" stroke-width="1" />
+        <!-- region boxes -->
+        <template v-for="region in regions" :key="'region-' + region.id">
+          <!-- background box -->
+          <rect
+            :x="10"
+            :y="regionY(region)"
+            :width="seqCanvasWidth - 20"
+            :height="regionHeight(region)"
+            :fill="regionTypeInfo(region.type).fill"
+            fill-opacity="0.25"
+            :stroke="regionTypeInfo(region.type).stroke"
+            stroke-width="1.5"
+            stroke-dasharray="6 4"
+            rx="4"
+            style="cursor:pointer"
+            @mousedown.stop="onRegionClick(region, $event)"
+          />
+          <!-- type badge (top-left) -->
+          <g style="cursor:pointer" @mousedown.stop="onRegionTypeClick(region, $event)">
+            <rect
+              :x="14"
+              :y="regionY(region) + 4"
+              :width="region.type.length * 7 + 10" height="16" rx="3"
+              :fill="regionTypeInfo(region.type).stroke"
+              fill-opacity="0.85"
+            />
+            <text
+              :x="14 + (region.type.length * 7 + 10) / 2"
+              :y="regionY(region) + 15"
+              fill="white" font-size="10" text-anchor="middle"
+              font-weight="bold" pointer-events="none"
+            >{{ region.type }}</text>
+          </g>
+          <!-- editable label (center-top) -->
+          <text v-if="editingRegionId !== region.id"
+            :x="seqCanvasWidth / 2"
+            :y="regionY(region) + 15"
+            :fill="regionTypeInfo(region.type).stroke"
+            font-size="12" text-anchor="middle"
+            style="cursor:text"
+            @dblclick.stop="startRegionLabelEdit(region)"
+          >{{ region.label || 'what is this?' }}</text>
+          <!-- inline label editor -->
+          <foreignObject v-if="editingRegionId === region.id"
+            :x="seqCanvasWidth / 2 - 80"
+            :y="regionY(region) + 4"
+            width="160" height="20">
+            <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+              <input ref="editRegionLabelRef" v-model="editRegionLabel"
+                     @keydown.enter.stop="commitRegionLabel"
+                     @keydown.escape.stop="editingRegionId = null"
+                     @blur="commitRegionLabel"
+                     style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:11px;text-align:center;padding:1px 4px;box-sizing:border-box;outline:none;" />
+            </div>
+          </foreignObject>
+        </template>
+        <!-- region drag preview -->
+        <rect v-if="regionDragPreview"
+          :x="10"
+          :y="SEQ_BODY_PADDING + regionDragPreview.startSlot * seqFlowSpacing - seqFlowSpacing / 2"
+          :width="seqCanvasWidth - 20"
+          :height="(regionDragPreview.endSlot - regionDragPreview.startSlot + 1) * seqFlowSpacing"
+          fill="#4f46e5" fill-opacity="0.12"
+          stroke="#818cf8" stroke-width="1.5"
+          stroke-dasharray="4 3" rx="4"
+          pointer-events="none"
+        />
         <!-- activation blocks -->
         <template v-for="act in activations" :key="'act-' + act.id">
           <g v-if="nodes.find(n => n.id === act.nodeId)"
@@ -1234,6 +1437,31 @@ function onKeyDown(e) {
       class="flex w-full items-center gap-2 px-3 py-2 text-gray-200 hover:bg-gray-700 transition-colors"
       @mousedown.stop="slotInsert('below')"
     >↓ 아래에 추가</button>
+  </div>
+
+  <!-- region type selection menu -->
+  <div
+    v-if="regionMenu"
+    class="absolute z-50 overflow-hidden rounded shadow-xl border border-gray-600 text-xs"
+    style="background:#1e293b; min-width:130px"
+    :style="{ left: regionMenu.x + 'px', top: regionMenu.y + 'px' }"
+    @mousedown.stop
+  >
+    <div class="px-3 py-1.5 text-gray-400 border-b border-gray-700 select-none">
+      {{ regionMenu.targetRegionId !== null ? '타입 변경' : '구역 타입 선택' }}
+    </div>
+    <div
+      v-for="rt in REGION_TYPES"
+      :key="rt.type"
+      class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-gray-200 hover:bg-gray-700 transition-colors"
+      @mousedown.stop="onRegionMenuSelect(rt.type)"
+    >
+      <span
+        class="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
+        :style="{ background: rt.stroke }"
+      ></span>
+      <span>{{ rt.label }}</span>
+    </div>
   </div>
 
   </div>
