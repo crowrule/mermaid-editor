@@ -698,14 +698,16 @@ function commitRegionLabel() {
 }
 
 function regionY(region) {
-  return SEQ_BODY_PADDING + region.startSlot * props.seqFlowSpacing - props.seqFlowSpacing / 2
+  const raw = SEQ_BODY_PADDING + region.startSlot * props.seqFlowSpacing - props.seqFlowSpacing / 2
+  return Math.max(0, raw)
 }
 function regionEffectiveEndSlot(region) {
   return (resizingRegionId.value === region.id && resizePreviewEndSlot.value !== null)
     ? resizePreviewEndSlot.value : region.endSlot
 }
 function regionHeight(region) {
-  return (regionEffectiveEndSlot(region) - region.startSlot + 1) * props.seqFlowSpacing
+  const bottom = SEQ_BODY_PADDING + (regionEffectiveEndSlot(region) + 1) * props.seqFlowSpacing - props.seqFlowSpacing / 2
+  return bottom - regionY(region)
 }
 function dividerKeyword(regionType) {
   if (regionType === 'alt')      return 'else'
@@ -1009,9 +1011,9 @@ function onKeyDown(e) {
         <!-- region drag preview -->
         <rect v-if="regionDragPreview"
           :x="10"
-          :y="SEQ_BODY_PADDING + regionDragPreview.startSlot * seqFlowSpacing - seqFlowSpacing / 2"
+          :y="Math.max(0, SEQ_BODY_PADDING + regionDragPreview.startSlot * seqFlowSpacing - seqFlowSpacing / 2)"
           :width="seqCanvasWidth - 20"
-          :height="(regionDragPreview.endSlot - regionDragPreview.startSlot + 1) * seqFlowSpacing"
+          :height="(SEQ_BODY_PADDING + (regionDragPreview.endSlot + 1) * seqFlowSpacing - seqFlowSpacing / 2) - Math.max(0, SEQ_BODY_PADDING + regionDragPreview.startSlot * seqFlowSpacing - seqFlowSpacing / 2)"
           fill="#4f46e5" fill-opacity="0.12"
           stroke="#818cf8" stroke-width="1.5"
           stroke-dasharray="4 3" rx="4"
