@@ -99,14 +99,26 @@ function onDocMousedown(e) {
   }
 }
 function onGlobalMousemove(e) {
-  if (regionDragStartSlot < 0) return
   if (!svgRef.value) return
+  const rect = svgRef.value.getBoundingClientRect()
+  const y = e.clientY - rect.top
+
+  // resize handle drag
+  if (resizingRegionId.value !== null) {
+    const slot = Math.max(0, Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing))
+    const region = props.regions.find(r => r.id === resizingRegionId.value)
+    if (region) {
+      resizePreviewEndSlot.value = Math.max(region.startSlot, Math.min(slot, props.seqFlowCount - 1))
+    }
+    return
+  }
+
+  // new region drag
+  if (regionDragStartSlot < 0) return
   if (!regionDragStarted) {
     if (Math.abs(e.clientY - regionDragStartY) > 8) regionDragStarted = true
     else return
   }
-  const rect = svgRef.value.getBoundingClientRect()
-  const y = e.clientY - rect.top
   const currentSlot = Math.max(0, Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing))
   const startSlot = Math.min(regionDragStartSlot, currentSlot)
   const endSlot   = Math.max(regionDragStartSlot, currentSlot)
@@ -114,6 +126,17 @@ function onGlobalMousemove(e) {
 }
 
 function onGlobalMouseup(e) {
+  // commit resize
+  if (resizingRegionId.value !== null) {
+    if (resizePreviewEndSlot.value !== null) {
+      emit('update-region', resizingRegionId.value, { endSlot: resizePreviewEndSlot.value })
+    }
+    resizingRegionId.value     = null
+    resizePreviewEndSlot.value = null
+    return
+  }
+
+  // commit new region drag
   if (regionDragStartSlot < 0) return
   if (regionDragStarted && regionDragPreview.value) {
     const { startSlot, endSlot } = regionDragPreview.value
@@ -182,6 +205,22 @@ const editRegionLabelRef = ref(null)
 let regionDragStartSlot  = -1
 let regionDragStartY     = 0
 let regionDragStarted    = false
+
+// ── region resize state ───────────────────────────────────────────────────────
+const resizingRegionId     = ref(null)
+const resizePreviewEndSlot = ref(null)
+
+// ── region divider edit state ─────────────────────────────────────────────────
+const editingDividerId    = ref(null)
+const editingDivRegionId  = ref(null)
+const editDividerLabel    = ref('')
+const editDividerLabelRef = ref(null)
+
+const currentMenuRegion = computed(() =>
+  regionMenu.value?.targetRegionId != null
+    ? props.regions.find(r => r.id === regionMenu.value.targetRegionId) ?? null
+    : null
+)
 const editingEdge = computed(() =>
   editingEdgeId.value !== null
     ? props.edges.find(e => e.id === editingEdgeId.value) ?? null
@@ -661,8 +700,70 @@ function commitRegionLabel() {
 function regionY(region) {
   return SEQ_BODY_PADDING + region.startSlot * props.seqFlowSpacing - props.seqFlowSpacing / 2
 }
+function regionEffectiveEndSlot(region) {
+  return (resizingRegionId.value === region.id && resizePreviewEndSlot.value !== null)
+    ? resizePreviewEndSlot.value : region.endSlot
+}
 function regionHeight(region) {
-  return (region.endSlot - region.startSlot + 1) * props.seqFlowSpacing
+  return (regionEffectiveEndSlot(region) - region.startSlot + 1) * props.seqFlowSpacing
+}
+function dividerKeyword(regionType) {
+  if (regionType === 'alt')      return 'else'
+  if (regionType === 'par')      return 'and'
+  if (regionType === 'critical') return 'option'
+  return ''
+}
+function dividerY(div) {
+  return SEQ_BODY_PADDING + div.slot * props.seqFlowSpacing - props.seqFlowSpacing / 2
+}
+
+function addDivider(region) {
+  const dividers = [...(region.dividers || [])].sort((a, b) => a.slot - b.slot)
+  const lastSlot = dividers.length ? dividers[dividers.length - 1].slot : region.startSlot
+  const endSlot  = regionEffectiveEndSlot(region)
+  const newSlot  = Math.round((lastSlot + endSlot + 1) / 2)
+  if (newSlot > region.startSlot && newSlot <= endSlot) {
+    emit('update-region', region.id, {
+      dividers: [...(region.dividers || []), { id: Date.now(), slot: newSlot, label: '' }],
+    })
+  }
+  regionMenu.value = null
+}
+
+function deleteDivider(region, divId, e) {
+  e?.stopPropagation()
+  emit('update-region', region.id, {
+    dividers: (region.dividers || []).filter(d => d.id !== divId),
+  })
+}
+
+function startDividerLabelEdit(region, div, e) {
+  e?.stopPropagation()
+  if (props.mode === 'delete') return
+  editingDividerId.value   = div.id
+  editingDivRegionId.value = region.id
+  editDividerLabel.value   = div.label || ''
+  nextTick(() => editDividerLabelRef.value?.focus())
+}
+
+function commitDividerLabel() {
+  if (editingDividerId.value === null) return
+  const region = props.regions.find(r => r.id === editingDivRegionId.value)
+  if (region) {
+    emit('update-region', region.id, {
+      dividers: (region.dividers || []).map(d =>
+        d.id === editingDividerId.value ? { ...d, label: editDividerLabel.value } : d
+      ),
+    })
+  }
+  editingDividerId.value   = null
+  editingDivRegionId.value = null
+}
+
+function onResizeHandleDown(region, e) {
+  e.stopPropagation()
+  resizingRegionId.value     = region.id
+  resizePreviewEndSlot.value = region.endSlot
 }
 
 // ── keyboard delete ───────────────────────────────────────────────────────────
@@ -680,13 +781,16 @@ function onKeyDown(e) {
     }
   }
   if (e.key === 'Escape') {
-    connectSource.value    = null
-    editingNodeId.value    = null
-    editingEdgeId.value    = null
-    editingRegionId.value  = null
-    addingAttrNodeId.value = null
-    ctxEdgeId.value        = null
-    regionMenu.value       = null
+    connectSource.value       = null
+    editingNodeId.value       = null
+    editingEdgeId.value       = null
+    editingRegionId.value     = null
+    editingDividerId.value    = null
+    addingAttrNodeId.value    = null
+    ctxEdgeId.value           = null
+    regionMenu.value          = null
+    resizingRegionId.value    = null
+    resizePreviewEndSlot.value = null
   }
 }
 </script>
@@ -835,6 +939,66 @@ function onKeyDown(e) {
                      style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:11px;text-align:center;padding:1px 4px;box-sizing:border-box;outline:none;" />
             </div>
           </foreignObject>
+          <!-- divider lines (else / and / option) -->
+          <template v-for="div in [...(region.dividers || [])].sort((a,b) => a.slot - b.slot)" :key="'div-' + div.id">
+            <g @mousedown.stop="mode === 'delete' ? deleteDivider(region, div.id, $event) : undefined">
+              <!-- divider line -->
+              <line
+                :x1="14" :y1="dividerY(div)"
+                :x2="seqCanvasWidth - 14" :y2="dividerY(div)"
+                :stroke="regionTypeInfo(region.type).stroke"
+                stroke-width="1" stroke-dasharray="4 3"
+              />
+              <!-- keyword badge -->
+              <rect
+                :x="14" :y="dividerY(div) + 3"
+                :width="dividerKeyword(region.type).length * 7 + 10" height="14" rx="2"
+                :fill="regionTypeInfo(region.type).stroke" fill-opacity="0.7"
+              />
+              <text
+                :x="14 + (dividerKeyword(region.type).length * 7 + 10) / 2"
+                :y="dividerY(div) + 13"
+                fill="white" font-size="9" text-anchor="middle" font-weight="bold"
+                pointer-events="none"
+              >{{ dividerKeyword(region.type) }}</text>
+              <!-- editable condition label -->
+              <text v-if="editingDividerId !== div.id"
+                :x="14 + dividerKeyword(region.type).length * 7 + 16"
+                :y="dividerY(div) + 13"
+                :fill="regionTypeInfo(region.type).stroke"
+                font-size="10" style="cursor:text"
+                @dblclick.stop="startDividerLabelEdit(region, div, $event)"
+              >{{ div.label || '...' }}</text>
+              <foreignObject v-if="editingDividerId === div.id"
+                :x="14 + dividerKeyword(region.type).length * 7 + 16"
+                :y="dividerY(div) + 3"
+                width="130" height="16">
+                <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+                  <input ref="editDividerLabelRef" v-model="editDividerLabel"
+                         @keydown.enter.stop="commitDividerLabel"
+                         @keydown.escape.stop="editingDividerId = null"
+                         @blur="commitDividerLabel"
+                         style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:10px;padding:1px 3px;box-sizing:border-box;outline:none;" />
+                </div>
+              </foreignObject>
+              <!-- delete × badge (delete mode) -->
+              <text v-if="mode === 'delete'"
+                :x="seqCanvasWidth - 18" :y="dividerY(div) + 13"
+                fill="#f87171" font-size="12" text-anchor="middle" style="cursor:pointer"
+                pointer-events="all"
+                @mousedown.stop="deleteDivider(region, div.id, $event)"
+              >×</text>
+            </g>
+          </template>
+          <!-- bottom resize handle -->
+          <g style="cursor:ns-resize" @mousedown.stop="onResizeHandleDown(region, $event)">
+            <rect
+              :x="seqCanvasWidth / 2 - 24"
+              :y="regionY(region) + regionHeight(region) - 6"
+              width="48" height="6" rx="3"
+              :fill="regionTypeInfo(region.type).stroke" fill-opacity="0.7"
+            />
+          </g>
         </template>
         <!-- region drag preview -->
         <rect v-if="regionDragPreview"
@@ -1443,7 +1607,7 @@ function onKeyDown(e) {
   <div
     v-if="regionMenu"
     class="absolute z-50 overflow-hidden rounded shadow-xl border border-gray-600 text-xs"
-    style="background:#1e293b; min-width:130px"
+    style="background:#1e293b; min-width:148px"
     :style="{ left: regionMenu.x + 'px', top: regionMenu.y + 'px' }"
     @mousedown.stop
   >
@@ -1454,14 +1618,23 @@ function onKeyDown(e) {
       v-for="rt in REGION_TYPES"
       :key="rt.type"
       class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-gray-200 hover:bg-gray-700 transition-colors"
+      :class="currentMenuRegion?.type === rt.type ? 'bg-gray-700' : ''"
       @mousedown.stop="onRegionMenuSelect(rt.type)"
     >
-      <span
-        class="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
-        :style="{ background: rt.stroke }"
-      ></span>
+      <span class="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0" :style="{ background: rt.stroke }"></span>
       <span>{{ rt.label }}</span>
     </div>
+    <!-- divider add option (alt / par / critical only) -->
+    <template v-if="currentMenuRegion && ['alt','par','critical'].includes(currentMenuRegion.type)">
+      <div class="border-t border-gray-700 my-0.5" />
+      <div
+        class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-emerald-300 hover:bg-gray-700 transition-colors"
+        @mousedown.stop="addDivider(currentMenuRegion)"
+      >
+        <span class="text-emerald-400">+</span>
+        <span>add '{{ dividerKeyword(currentMenuRegion.type) }}'</span>
+      </div>
+    </template>
   </div>
 
   </div>

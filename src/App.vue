@@ -226,6 +226,9 @@ function handleInsertSlot(slotIdx, position) {
   regions.value.forEach(region => {
     if (region.startSlot >= insertAt) region.startSlot += 1
     if (region.endSlot   >= insertAt) region.endSlot   += 1
+    region.dividers?.forEach(div => {
+      if (div.slot >= insertAt) div.slot += 1
+    })
   })
 }
 

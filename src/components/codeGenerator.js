@@ -88,6 +88,11 @@ function generateSequence(nodes, edges, autonumber, activations = [], regions = 
   })
   regions.forEach(region => {
     events.push({ type: 'region-start', slot: region.startSlot - 0.5, region })
+    if (region.dividers?.length) {
+      region.dividers.forEach(div => {
+        events.push({ type: 'region-divider', slot: div.slot - 0.5, divider: div, region })
+      })
+    }
     events.push({ type: 'region-end',   slot: region.endSlot   + 0.5, regionId: region.id })
   })
   events.sort((a, b) => a.slot - b.slot)
@@ -100,8 +105,14 @@ function generateSequence(nodes, edges, autonumber, activations = [], regions = 
       if (region.type === 'rect') {
         lines.push(`  rect rgb(0, 179, 179)`)
       } else {
-        lines.push(`  ${region.type} ${region.label || region.type}`)
+        const lbl = region.label ? ` ${region.label}` : ''
+        lines.push(`  ${region.type}${lbl}`)
       }
+    } else if (ev.type === 'region-divider') {
+      const { divider, region } = ev
+      const kw = region.type === 'alt' ? 'else' : region.type === 'par' ? 'and' : 'option'
+      const lbl = divider.label ? ` ${divider.label}` : ''
+      lines.push(`  ${kw}${lbl}`)
     } else if (ev.type === 'region-end') {
       lines.push(`  end`)
     } else {
