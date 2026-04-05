@@ -720,13 +720,19 @@ function dividerY(div) {
 function addDivider(region) {
   const dividers = [...(region.dividers || [])].sort((a, b) => a.slot - b.slot)
   const lastSlot = dividers.length ? dividers[dividers.length - 1].slot : region.startSlot
-  const endSlot  = regionEffectiveEndSlot(region)
-  const newSlot  = Math.round((lastSlot + endSlot + 1) / 2)
-  if (newSlot > region.startSlot && newSlot <= endSlot) {
-    emit('update-region', region.id, {
-      dividers: [...(region.dividers || []), { id: Date.now(), slot: newSlot, label: '' }],
-    })
+  let effectiveEnd = regionEffectiveEndSlot(region)
+
+  // If there's no room between lastSlot and current endSlot, auto-extend the region
+  if (lastSlot >= effectiveEnd) {
+    effectiveEnd = Math.min(lastSlot + 1, props.seqFlowCount - 1)
   }
+
+  const newSlot = Math.round((lastSlot + effectiveEnd + 1) / 2)
+  const updates = {
+    dividers: [...(region.dividers || []), { id: Date.now(), slot: newSlot, label: '' }],
+  }
+  if (effectiveEnd !== region.endSlot) updates.endSlot = effectiveEnd
+  emit('update-region', region.id, updates)
   regionMenu.value = null
 }
 
