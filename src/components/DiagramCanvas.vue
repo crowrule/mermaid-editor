@@ -103,6 +103,20 @@ function onGlobalMousemove(e) {
   const rect = svgRef.value.getBoundingClientRect()
   const y = e.clientY - rect.top
 
+  // divider line drag
+  if (draggingDivId.value !== null) {
+    const region = props.regions.find(r => r.id === draggingDivRegId.value)
+    if (region) {
+      const slot = Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing)
+      const dividers = [...(region.dividers || [])].sort((a, b) => a.slot - b.slot)
+      const divIdx   = dividers.findIndex(d => d.id === draggingDivId.value)
+      const minSlot  = divIdx > 0 ? dividers[divIdx - 1].slot + 1 : region.startSlot + 1
+      const maxSlot  = divIdx < dividers.length - 1 ? dividers[divIdx + 1].slot - 1 : props.seqFlowCount - 1
+      divDragPreviewSlot.value = Math.max(minSlot, Math.min(slot, maxSlot))
+    }
+    return
+  }
+
   // resize handle drag
   if (resizingRegionId.value !== null) {
     const slot = Math.max(0, Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing))
@@ -126,6 +140,26 @@ function onGlobalMousemove(e) {
 }
 
 function onGlobalMouseup(e) {
+  // commit divider drag
+  if (draggingDivId.value !== null) {
+    const region = props.regions.find(r => r.id === draggingDivRegId.value)
+    if (region && divDragPreviewSlot.value !== null) {
+      const newSlot = divDragPreviewSlot.value
+      const updates = {
+        dividers: (region.dividers || []).map(d =>
+          d.id === draggingDivId.value ? { ...d, slot: newSlot } : d
+        ),
+      }
+      // auto-extend region if divider dragged beyond current endSlot
+      if (newSlot >= region.endSlot) updates.endSlot = newSlot
+      emit('update-region', region.id, updates)
+    }
+    draggingDivId.value      = null
+    draggingDivRegId.value   = null
+    divDragPreviewSlot.value = null
+    return
+  }
+
   // commit resize
   if (resizingRegionId.value !== null) {
     if (resizePreviewEndSlot.value !== null) {
@@ -215,6 +249,11 @@ const editingDividerId    = ref(null)
 const editingDivRegionId  = ref(null)
 const editDividerLabel    = ref('')
 const editDividerLabelRef = ref(null)
+
+// ── region divider drag state ─────────────────────────────────────────────────
+const draggingDivId      = ref(null)
+const draggingDivRegId   = ref(null)
+const divDragPreviewSlot = ref(null)
 
 const currentMenuRegion = computed(() =>
   regionMenu.value?.targetRegionId != null
@@ -715,8 +754,24 @@ function dividerKeyword(regionType) {
   if (regionType === 'critical') return 'option'
   return ''
 }
+function dividerEffectiveSlot(div) {
+  return (draggingDivId.value === div.id && divDragPreviewSlot.value !== null)
+    ? divDragPreviewSlot.value : div.slot
+}
 function dividerY(div) {
-  return SEQ_BODY_PADDING + div.slot * props.seqFlowSpacing - props.seqFlowSpacing / 2
+  return SEQ_BODY_PADDING + dividerEffectiveSlot(div) * props.seqFlowSpacing - props.seqFlowSpacing / 2
+}
+
+function onDividerMousedown(region, div, e) {
+  e.stopPropagation()
+  if (props.mode === 'delete') {
+    deleteDivider(region, div.id, e)
+    return
+  }
+  // start drag (select / connect / add all allow drag)
+  draggingDivId.value      = div.id
+  draggingDivRegId.value   = region.id
+  divDragPreviewSlot.value = div.slot
 }
 
 function addDivider(region) {
@@ -794,6 +849,9 @@ function onKeyDown(e) {
     editingEdgeId.value       = null
     editingRegionId.value     = null
     editingDividerId.value    = null
+    draggingDivId.value       = null
+    draggingDivRegId.value    = null
+    divDragPreviewSlot.value  = null
     addingAttrNodeId.value    = null
     ctxEdgeId.value           = null
     regionMenu.value          = null
@@ -949,13 +1007,21 @@ function onKeyDown(e) {
           </foreignObject>
           <!-- divider lines (else / and / option) -->
           <template v-for="div in [...(region.dividers || [])].sort((a,b) => a.slot - b.slot)" :key="'div-' + div.id">
-            <g @mousedown.stop="mode === 'delete' ? deleteDivider(region, div.id, $event) : undefined">
+            <g :style="mode === 'delete' ? 'cursor:pointer' : 'cursor:ns-resize'"
+               @mousedown.stop="onDividerMousedown(region, div, $event)">
+              <!-- wider invisible hit area for easier grab -->
+              <line
+                :x1="14" :y1="dividerY(div)"
+                :x2="seqCanvasWidth - 14" :y2="dividerY(div)"
+                stroke="transparent" stroke-width="16"
+              />
               <!-- divider line -->
               <line
                 :x1="14" :y1="dividerY(div)"
                 :x2="seqCanvasWidth - 14" :y2="dividerY(div)"
-                :stroke="regionTypeInfo(region.type).stroke"
-                stroke-width="1" stroke-dasharray="4 3"
+                :stroke="draggingDivId === div.id ? '#f59e0b' : regionTypeInfo(region.type).stroke"
+                :stroke-width="draggingDivId === div.id ? 2 : 1"
+                stroke-dasharray="4 3"
               />
               <!-- keyword badge -->
               <rect
