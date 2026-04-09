@@ -92,10 +92,12 @@ const ctxFromNode = computed(() => ctxEdge.value ? props.nodes.find(n => n.id ==
 const ctxToNode   = computed(() => ctxEdge.value ? props.nodes.find(n => n.id === ctxEdge.value.to)   : null)
 // Close menu when clicking outside the canvas container
 function onDocMousedown(e) {
+  // Region menu closes on any click outside the menu div itself
+  // (the menu has @mousedown.stop, so internal clicks never reach here)
+  regionMenu.value = null
   if (containerRef.value && !containerRef.value.contains(e.target)) {
     ctxEdgeId.value = null
     slotCtxVisible.value = false
-    regionMenu.value = null
   }
 }
 function onGlobalMousemove(e) {
@@ -1064,13 +1066,21 @@ function onKeyDown(e) {
               >×</text>
             </g>
           </template>
-          <!-- bottom resize handle -->
+          <!-- bottom border — full-width drag handle -->
           <g style="cursor:ns-resize" @mousedown.stop="onResizeHandleDown(region, $event)">
+            <!-- invisible wide hit area covering the entire bottom edge -->
+            <line
+              :x1="10" :y1="regionY(region) + regionHeight(region)"
+              :x2="seqCanvasWidth - 10" :y2="regionY(region) + regionHeight(region)"
+              stroke="transparent" stroke-width="16"
+            />
+            <!-- visible center grip bar -->
             <rect
               :x="seqCanvasWidth / 2 - 24"
-              :y="regionY(region) + regionHeight(region) - 6"
-              width="48" height="6" rx="3"
-              :fill="regionTypeInfo(region.type).stroke" fill-opacity="0.7"
+              :y="regionY(region) + regionHeight(region) - 4"
+              width="48" height="4" rx="2"
+              :fill="regionTypeInfo(region.type).stroke"
+              :fill-opacity="resizingRegionId === region.id ? 1 : 0.5"
             />
           </g>
         </template>
