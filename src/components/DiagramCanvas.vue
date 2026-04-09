@@ -73,7 +73,8 @@ const SEQ_OFFSET_X = 100
 const SEQ_LIFELINE_TOP = 80
 const SEQ_MESSAGE_START_Y = 110
 // SEQ_MESSAGE_SPACING removed — now driven by seqFlowSpacing prop
-const SEQ_BODY_PADDING = 20  // vertical padding at top of scrollable body SVG
+const SEQ_BODY_PADDING    = 20   // vertical padding at top of scrollable body SVG
+const REGION_LABEL_MARGIN = 170  // right-side label column width
 
 // ── state ────────────────────────────────────────────────────────────────────
 const containerRef = ref(null)
@@ -92,9 +93,11 @@ const ctxFromNode = computed(() => ctxEdge.value ? props.nodes.find(n => n.id ==
 const ctxToNode   = computed(() => ctxEdge.value ? props.nodes.find(n => n.id === ctxEdge.value.to)   : null)
 // Close menu when clicking outside the canvas container
 function onDocMousedown(e) {
-  // Region menu closes on any click outside the menu div itself
-  // (the menu has @mousedown.stop, so internal clicks never reach here)
-  regionMenu.value = null
+  // Floating menus close on any click outside themselves
+  // (each menu has @mousedown.stop, so internal clicks never reach here)
+  regionMenu.value     = null
+  dividerCtxMenu.value = null
+  regionCtxMenu.value  = null
   if (containerRef.value && !containerRef.value.contains(e.target)) {
     ctxEdgeId.value = null
     slotCtxVisible.value = false
@@ -107,9 +110,15 @@ function onGlobalMousemove(e) {
 
   // divider line drag
   if (draggingDivId.value !== null) {
+    if (!dividerDragStarted) {
+      if (Math.abs(e.clientY - dividerDragStartY) > 8) {
+        dividerDragStarted   = true
+        dividerCtxMenu.value = null   // hide menu once dragging begins
+      } else return
+    }
     const region = props.regions.find(r => r.id === draggingDivRegId.value)
     if (region) {
-      const slot = Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing)
+      const slot   = Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing)
       const dividers = [...(region.dividers || [])].sort((a, b) => a.slot - b.slot)
       const divIdx   = dividers.findIndex(d => d.id === draggingDivId.value)
       const minSlot  = divIdx > 0 ? dividers[divIdx - 1].slot + 1 : region.startSlot + 1
@@ -144,21 +153,24 @@ function onGlobalMousemove(e) {
 function onGlobalMouseup(e) {
   // commit divider drag
   if (draggingDivId.value !== null) {
-    const region = props.regions.find(r => r.id === draggingDivRegId.value)
-    if (region && divDragPreviewSlot.value !== null) {
-      const newSlot = divDragPreviewSlot.value
-      const updates = {
-        dividers: (region.dividers || []).map(d =>
-          d.id === draggingDivId.value ? { ...d, slot: newSlot } : d
-        ),
+    if (dividerDragStarted) {
+      const region = props.regions.find(r => r.id === draggingDivRegId.value)
+      if (region && divDragPreviewSlot.value !== null) {
+        const newSlot  = divDragPreviewSlot.value
+        const updates  = {
+          dividers: (region.dividers || []).map(d =>
+            d.id === draggingDivId.value ? { ...d, slot: newSlot } : d
+          ),
+        }
+        if (newSlot >= region.endSlot) updates.endSlot = newSlot
+        emit('update-region', region.id, updates)
       }
-      // auto-extend region if divider dragged beyond current endSlot
-      if (newSlot >= region.endSlot) updates.endSlot = newSlot
-      emit('update-region', region.id, updates)
     }
+    // always reset drag state; menu stays open if no drag occurred
     draggingDivId.value      = null
     draggingDivRegId.value   = null
     divDragPreviewSlot.value = null
+    dividerDragStarted       = false
     return
   }
 
@@ -256,6 +268,12 @@ const editDividerLabelRef = ref(null)
 const draggingDivId      = ref(null)
 const draggingDivRegId   = ref(null)
 const divDragPreviewSlot = ref(null)
+let   dividerDragStartY      = 0
+let   dividerDragStarted     = false
+
+// ── region divider context menu ───────────────────────────────────────────────
+const dividerCtxMenu = ref(null)  // { x, y, divId, regionId }
+const regionCtxMenu  = ref(null)  // { x, y, regionId }
 
 const currentMenuRegion = computed(() =>
   regionMenu.value?.targetRegionId != null
@@ -292,12 +310,16 @@ const isSequence = computed(() => props.diagramType === 'sequence')
 const seqBodyHeight = computed(() =>
   SEQ_BODY_PADDING + props.seqFlowCount * props.seqFlowSpacing + 40
 )
-// Width shared by header SVG and body SVG
-const seqCanvasWidth = computed(() => {
+// Participant / message drawing area width
+const seqBodyWidth = computed(() => {
   const n = props.nodes.length
   if (n === 0) return 400
   return SEQ_OFFSET_X + (n - 1) * SEQ_PARTICIPANT_SPACING + NODE_W + 80
 })
+// Total SVG width: adds right column for region labels when regions exist
+const seqCanvasWidth = computed(() =>
+  seqBodyWidth.value + (props.regions.length > 0 ? REGION_LABEL_MARGIN : 0)
+)
 
 function seqX(node) {
   const idx = props.nodes.indexOf(node)
@@ -750,6 +772,22 @@ function regionHeight(region) {
   const bottom = SEQ_BODY_PADDING + (regionEffectiveEndSlot(region) + 1) * props.seqFlowSpacing - props.seqFlowSpacing / 2
   return bottom - regionY(region)
 }
+// Returns per-section layout info for rendering (main + each divider sub-section)
+function sectionBounds(region) {
+  const dividers = [...(region.dividers || [])].sort((a, b) => a.slot - b.slot)
+  const totalBottom = regionY(region) + regionHeight(region)
+  const sections = []
+  const firstBottom = dividers.length > 0 ? dividerY(dividers[0]) : totalBottom
+  sections.push({ topY: regionY(region), height: firstBottom - regionY(region), isMain: true, keyword: region.type, div: null })
+  for (let i = 0; i < dividers.length; i++) {
+    const div = dividers[i]
+    const secTop    = dividerY(div)
+    const secBottom = i < dividers.length - 1 ? dividerY(dividers[i + 1]) : totalBottom
+    sections.push({ topY: secTop, height: secBottom - secTop, isMain: false, keyword: dividerKeyword(region.type), div })
+  }
+  return sections
+}
+
 function dividerKeyword(regionType) {
   if (regionType === 'alt')      return 'else'
   if (regionType === 'par')      return 'and'
@@ -764,16 +802,54 @@ function dividerY(div) {
   return SEQ_BODY_PADDING + dividerEffectiveSlot(div) * props.seqFlowSpacing - props.seqFlowSpacing / 2
 }
 
+// Line drag only — no menu
 function onDividerMousedown(region, div, e) {
   e.stopPropagation()
-  if (props.mode === 'delete') {
-    deleteDivider(region, div.id, e)
-    return
-  }
-  // start drag (select / connect / add all allow drag)
+  dividerCtxMenu.value     = null
   draggingDivId.value      = div.id
   draggingDivRegId.value   = region.id
   divDragPreviewSlot.value = div.slot
+  dividerDragStartY        = e.clientY
+  dividerDragStarted       = false
+}
+
+// Badge (keyword) click — show delete menu only, no drag
+function onDividerBadgeMousedown(region, div, e) {
+  e.stopPropagation()
+  const rect = containerRef.value.getBoundingClientRect()
+  dividerCtxMenu.value = {
+    x: e.clientX - rect.left + 4,
+    y: e.clientY - rect.top + 4,
+    divId: div.id,
+    regionId: region.id,
+  }
+}
+
+function deleteDividerFromMenu() {
+  if (!dividerCtxMenu.value) return
+  const region = props.regions.find(r => r.id === dividerCtxMenu.value.regionId)
+  if (region) {
+    emit('update-region', region.id, {
+      dividers: (region.dividers || []).filter(d => d.id !== dividerCtxMenu.value.divId),
+    })
+  }
+  dividerCtxMenu.value = null
+}
+
+function onRegionDeleteBadgeMousedown(region, e) {
+  e.stopPropagation()
+  const rect = containerRef.value.getBoundingClientRect()
+  regionCtxMenu.value = {
+    x: e.clientX - rect.left + 4,
+    y: e.clientY - rect.top + 4,
+    regionId: region.id,
+  }
+}
+
+function deleteRegionFromCtxMenu() {
+  if (!regionCtxMenu.value) return
+  emit('delete-region', regionCtxMenu.value.regionId)
+  regionCtxMenu.value = null
 }
 
 function addDivider(region) {
@@ -827,6 +903,7 @@ function commitDividerLabel() {
 
 function onResizeHandleDown(region, e) {
   e.stopPropagation()
+  regionCtxMenu.value        = null
   resizingRegionId.value     = region.id
   resizePreviewEndSlot.value = region.endSlot
 }
@@ -854,6 +931,7 @@ function onKeyDown(e) {
     draggingDivId.value       = null
     draggingDivRegId.value    = null
     divDragPreviewSlot.value  = null
+    dividerCtxMenu.value      = null
     addingAttrNodeId.value    = null
     ctxEdgeId.value           = null
     regionMenu.value          = null
@@ -952,102 +1030,68 @@ function onKeyDown(e) {
         <line v-for="node in nodes" :key="'life-' + node.id"
               :x1="seqX(node)" y1="0" :x2="seqX(node)" :y2="seqBodyHeight"
               stroke="#374151" stroke-dasharray="6 4" stroke-width="1" />
-        <!-- region boxes -->
+        <!-- region boxes (per-section rects) -->
         <template v-for="region in regions" :key="'region-' + region.id">
-          <!-- background box -->
-          <rect
-            :x="10"
-            :y="regionY(region)"
-            :width="seqCanvasWidth - 20"
-            :height="regionHeight(region)"
-            :fill="regionTypeInfo(region.type).fill"
-            fill-opacity="0.25"
-            :stroke="regionTypeInfo(region.type).stroke"
-            stroke-width="1.5"
-            stroke-dasharray="6 4"
-            rx="4"
-            style="cursor:pointer"
-            @mousedown.stop="onRegionClick(region, $event)"
-          />
-          <!-- type badge (top-left) -->
-          <g style="cursor:pointer" @mousedown.stop="onRegionTypeClick(region, $event)">
+          <!-- individual section rects using sectionBounds -->
+          <template v-for="(sec, si) in sectionBounds(region)" :key="'rsec-' + region.id + '-' + si">
+            <!-- section background rect -->
             <rect
-              :x="14"
-              :y="regionY(region) + 4"
-              :width="region.type.length * 7 + 10" height="16" rx="3"
-              :fill="regionTypeInfo(region.type).stroke"
-              fill-opacity="0.85"
+              :x="10"
+              :y="sec.topY"
+              :width="seqBodyWidth - 20"
+              :height="sec.height"
+              :fill="regionTypeInfo(region.type).fill"
+              fill-opacity="0.25"
+              :stroke="regionTypeInfo(region.type).stroke"
+              stroke-width="1.5"
+              stroke-dasharray="6 4"
+              rx="4"
+              style="cursor:pointer"
+              @mousedown.stop="sec.isMain ? onRegionClick(region, $event) : $event.stopPropagation()"
             />
-            <text
-              :x="14 + (region.type.length * 7 + 10) / 2"
-              :y="regionY(region) + 15"
-              fill="white" font-size="10" text-anchor="middle"
-              font-weight="bold" pointer-events="none"
-            >{{ region.type }}</text>
-          </g>
-          <!-- editable label (center-top) -->
-          <text v-if="editingRegionId !== region.id"
-            :x="seqCanvasWidth / 2"
-            :y="regionY(region) + 15"
-            :fill="regionTypeInfo(region.type).stroke"
-            font-size="12" text-anchor="middle"
-            style="cursor:text"
-            @dblclick.stop="startRegionLabelEdit(region)"
-          >{{ region.label || 'what is this?' }}</text>
-          <!-- inline label editor -->
-          <foreignObject v-if="editingRegionId === region.id"
-            :x="seqCanvasWidth / 2 - 80"
-            :y="regionY(region) + 4"
-            width="160" height="20">
-            <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
-              <input ref="editRegionLabelRef" v-model="editRegionLabel"
-                     @keydown.enter.stop="commitRegionLabel"
-                     @keydown.escape.stop="editingRegionId = null"
-                     @blur="commitRegionLabel"
-                     style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:11px;text-align:center;padding:1px 4px;box-sizing:border-box;outline:none;" />
-            </div>
-          </foreignObject>
-          <!-- divider lines (else / and / option) -->
-          <template v-for="div in [...(region.dividers || [])].sort((a,b) => a.slot - b.slot)" :key="'div-' + div.id">
-            <g :style="mode === 'delete' ? 'cursor:pointer' : 'cursor:ns-resize'"
-               @mousedown.stop="onDividerMousedown(region, div, $event)">
-              <!-- wider invisible hit area for easier grab -->
-              <line
-                :x1="14" :y1="dividerY(div)"
-                :x2="seqCanvasWidth - 14" :y2="dividerY(div)"
-                stroke="transparent" stroke-width="16"
-              />
-              <!-- divider line -->
-              <line
-                :x1="14" :y1="dividerY(div)"
-                :x2="seqCanvasWidth - 14" :y2="dividerY(div)"
-                :stroke="draggingDivId === div.id ? '#f59e0b' : regionTypeInfo(region.type).stroke"
-                :stroke-width="draggingDivId === div.id ? 2 : 1"
-                stroke-dasharray="4 3"
-              />
-              <!-- keyword badge -->
+            <!-- keyword badge (top-left of each section) -->
+            <g style="cursor:pointer"
+               @mousedown.stop="sec.isMain ? onRegionTypeClick(region, $event) : onDividerBadgeMousedown(region, sec.div, $event)">
               <rect
-                :x="14" :y="dividerY(div) + 3"
-                :width="dividerKeyword(region.type).length * 7 + 10" height="14" rx="2"
-                :fill="regionTypeInfo(region.type).stroke" fill-opacity="0.7"
+                :x="14"
+                :y="sec.topY + 4"
+                :width="sec.keyword.length * 7 + 10" height="16" rx="3"
+                :fill="regionTypeInfo(region.type).stroke"
+                :fill-opacity="!sec.isMain && dividerCtxMenu?.divId === sec.div?.id ? 1 : 0.85"
               />
               <text
-                :x="14 + (dividerKeyword(region.type).length * 7 + 10) / 2"
-                :y="dividerY(div) + 13"
-                fill="white" font-size="9" text-anchor="middle" font-weight="bold"
-                pointer-events="none"
-              >{{ dividerKeyword(region.type) }}</text>
-              <!-- editable condition label -->
-              <text v-if="editingDividerId !== div.id"
+                :x="14 + (sec.keyword.length * 7 + 10) / 2"
+                :y="sec.topY + 15"
+                fill="white" font-size="10" text-anchor="middle"
+                font-weight="bold" pointer-events="none"
+              >{{ sec.keyword }}</text>
+            </g>
+            <!-- divider drag handle + editable label (sub-sections only) -->
+            <template v-if="!sec.isMain && sec.div">
+              <g style="cursor:ns-resize" @mousedown.stop="onDividerMousedown(region, sec.div, $event)">
+                <line
+                  :x1="14" :y1="sec.topY"
+                  :x2="seqBodyWidth - 14" :y2="sec.topY"
+                  stroke="transparent" stroke-width="16"
+                />
+                <line
+                  :x1="14" :y1="sec.topY"
+                  :x2="seqBodyWidth - 14" :y2="sec.topY"
+                  :stroke="draggingDivId === sec.div.id ? '#f59e0b' : regionTypeInfo(region.type).stroke"
+                  :stroke-width="draggingDivId === sec.div.id ? 2 : 1"
+                  stroke-dasharray="4 3"
+                />
+              </g>
+              <text v-if="editingDividerId !== sec.div.id"
                 :x="14 + dividerKeyword(region.type).length * 7 + 16"
-                :y="dividerY(div) + 13"
+                :y="sec.topY + 15"
                 :fill="regionTypeInfo(region.type).stroke"
                 font-size="10" style="cursor:text"
-                @dblclick.stop="startDividerLabelEdit(region, div, $event)"
-              >{{ div.label || '...' }}</text>
-              <foreignObject v-if="editingDividerId === div.id"
+                @dblclick.stop="startDividerLabelEdit(region, sec.div, $event)"
+              >{{ sec.div.label || '...' }}</text>
+              <foreignObject v-if="editingDividerId === sec.div.id"
                 :x="14 + dividerKeyword(region.type).length * 7 + 16"
-                :y="dividerY(div) + 3"
+                :y="sec.topY + 5"
                 width="130" height="16">
                 <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
                   <input ref="editDividerLabelRef" v-model="editDividerLabel"
@@ -1057,38 +1101,74 @@ function onKeyDown(e) {
                          style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:10px;padding:1px 3px;box-sizing:border-box;outline:none;" />
                 </div>
               </foreignObject>
-              <!-- delete × badge (delete mode) -->
-              <text v-if="mode === 'delete'"
-                :x="seqCanvasWidth - 18" :y="dividerY(div) + 13"
-                fill="#f87171" font-size="12" text-anchor="middle" style="cursor:pointer"
-                pointer-events="all"
-                @mousedown.stop="deleteDivider(region, div.id, $event)"
-              >×</text>
-            </g>
+            </template>
           </template>
+          <!-- right-side label: connector line + display/edit -->
+          <line
+            :x1="seqBodyWidth - 10"
+            :y1="regionY(region) + regionHeight(region) / 2"
+            :x2="seqBodyWidth + 12"
+            :y2="regionY(region) + regionHeight(region) / 2"
+            :stroke="regionTypeInfo(region.type).stroke"
+            stroke-width="1" stroke-dasharray="3 2" opacity="0.7"
+          />
+          <text v-if="editingRegionId !== region.id"
+            :x="seqBodyWidth + 18"
+            :y="regionY(region) + regionHeight(region) / 2 + 4"
+            :fill="regionTypeInfo(region.type).stroke"
+            font-size="12" text-anchor="start"
+            style="cursor:text"
+            @dblclick.stop="startRegionLabelEdit(region)"
+          >{{ region.label || 'what is this?' }}</text>
+          <foreignObject v-if="editingRegionId === region.id"
+            :x="seqBodyWidth + 14"
+            :y="regionY(region) + regionHeight(region) / 2 - 14"
+            :width="REGION_LABEL_MARGIN - 24" height="28">
+            <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+              <input ref="editRegionLabelRef" v-model="editRegionLabel"
+                     @keydown.enter.stop="commitRegionLabel"
+                     @keydown.escape.stop="editingRegionId = null"
+                     @blur="commitRegionLabel"
+                     style="width:100%;height:100%;background:#1e293b;color:#f3f4f6;border:1px solid #818cf8;font-size:11px;text-align:left;padding:2px 6px;box-sizing:border-box;outline:none;border-radius:3px;" />
+            </div>
+          </foreignObject>
           <!-- bottom border — full-width drag handle -->
           <g style="cursor:ns-resize" @mousedown.stop="onResizeHandleDown(region, $event)">
-            <!-- invisible wide hit area covering the entire bottom edge -->
             <line
               :x1="10" :y1="regionY(region) + regionHeight(region)"
-              :x2="seqCanvasWidth - 10" :y2="regionY(region) + regionHeight(region)"
+              :x2="seqBodyWidth - 10" :y2="regionY(region) + regionHeight(region)"
               stroke="transparent" stroke-width="16"
             />
-            <!-- visible center grip bar -->
             <rect
-              :x="seqCanvasWidth / 2 - 24"
+              :x="seqBodyWidth / 2 - 24"
               :y="regionY(region) + regionHeight(region) - 4"
               width="48" height="4" rx="2"
               :fill="regionTypeInfo(region.type).stroke"
               :fill-opacity="resizingRegionId === region.id ? 1 : 0.5"
             />
           </g>
+          <!-- bottom delete badge (rendered above resize handle so click takes priority) -->
+          <g style="cursor:pointer" @mousedown.stop="onRegionDeleteBadgeMousedown(region, $event)">
+            <rect
+              :x="14"
+              :y="regionY(region) + regionHeight(region) - 10"
+              width="36" height="14" rx="3"
+              :fill="regionTypeInfo(region.type).stroke"
+              :fill-opacity="regionCtxMenu?.regionId === region.id ? 1 : 0.65"
+            />
+            <text
+              :x="32"
+              :y="regionY(region) + regionHeight(region) - 1"
+              fill="white" font-size="9" text-anchor="middle"
+              font-weight="bold" pointer-events="none"
+            >delete</text>
+          </g>
         </template>
         <!-- region drag preview -->
         <rect v-if="regionDragPreview"
           :x="10"
           :y="Math.max(0, SEQ_BODY_PADDING + regionDragPreview.startSlot * seqFlowSpacing - seqFlowSpacing / 2)"
-          :width="seqCanvasWidth - 20"
+          :width="seqBodyWidth - 20"
           :height="(SEQ_BODY_PADDING + (regionDragPreview.endSlot + 1) * seqFlowSpacing - seqFlowSpacing / 2) - Math.max(0, SEQ_BODY_PADDING + regionDragPreview.startSlot * seqFlowSpacing - seqFlowSpacing / 2)"
           fill="#4f46e5" fill-opacity="0.12"
           stroke="#818cf8" stroke-width="1.5"
@@ -1685,6 +1765,38 @@ function onKeyDown(e) {
       class="flex w-full items-center gap-2 px-3 py-2 text-gray-200 hover:bg-gray-700 transition-colors"
       @mousedown.stop="slotInsert('below')"
     >↓ 아래에 추가</button>
+  </div>
+
+  <!-- divider delete context menu -->
+  <div
+    v-if="dividerCtxMenu"
+    class="absolute z-50 overflow-hidden rounded shadow-xl border border-gray-600 text-xs"
+    style="background:#1e293b; min-width:100px"
+    :style="{ left: dividerCtxMenu.x + 'px', top: dividerCtxMenu.y + 'px' }"
+    @mousedown.stop
+  >
+    <div
+      class="flex items-center gap-2 px-3 py-2 cursor-pointer text-red-400 hover:bg-gray-700 transition-colors"
+      @mousedown.stop="deleteDividerFromMenu"
+    >
+      <span>✕</span><span>Delete</span>
+    </div>
+  </div>
+
+  <!-- region delete context menu -->
+  <div
+    v-if="regionCtxMenu"
+    class="absolute z-50 overflow-hidden rounded shadow-xl border border-gray-600 text-xs"
+    style="background:#1e293b; min-width:100px"
+    :style="{ left: regionCtxMenu.x + 'px', top: regionCtxMenu.y + 'px' }"
+    @mousedown.stop
+  >
+    <div
+      class="flex items-center gap-2 px-3 py-2 cursor-pointer text-red-400 hover:bg-gray-700 transition-colors"
+      @mousedown.stop="deleteRegionFromCtxMenu"
+    >
+      <span>✕</span><span>Delete Region</span>
+    </div>
   </div>
 
   <!-- region type selection menu -->
