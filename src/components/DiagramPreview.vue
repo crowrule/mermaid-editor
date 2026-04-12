@@ -39,8 +39,18 @@ async function renderDiagram(code) {
     const id = `mermaid-diagram-${++renderCount}`
     const { svg } = await m.render(id, code)
     containerRef.value.innerHTML = svg
+    // Fix SVG width: mermaid sometimes sets max-width in style, sometimes width="100%" attribute.
+    // Either way, replace with an explicit fixed pixel width so the container scrolls instead of shrinking.
+    const svgEl = containerRef.value.querySelector('svg')
+    if (svgEl) {
+      const naturalW = parseFloat(svgEl.style.maxWidth) || svgEl.viewBox.baseVal.width
+      if (naturalW) {
+        svgEl.removeAttribute('width')
+        svgEl.style.width    = naturalW + 'px'
+        svgEl.style.maxWidth = 'none'
+      }
+    }
     if (code.trim().startsWith('sequenceDiagram')) {
-      const svgEl = containerRef.value.querySelector('svg')
       if (svgEl) {
         const SHIFT = 20
         // rect.actor 중 y값이 높은 쪽이 bottom actor
@@ -114,7 +124,7 @@ onMounted(() => {
 
     <div
       ref="containerRef"
-      class="flex-1 overflow-auto p-4 flex items-start justify-center bg-gray-950 [&>svg]:max-w-full [&>svg]:h-auto"
+      class="flex-1 overflow-auto p-4 flex items-start justify-start bg-gray-950 [&>svg]:h-auto [&>svg]:shrink-0"
     />
   </div>
 </template>

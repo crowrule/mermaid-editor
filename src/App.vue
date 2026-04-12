@@ -50,45 +50,21 @@ const leftPct = ref(60)
 const isResizing = ref(false)
 const mainRef = ref(null)
 
-// Minimum panel widths captured at drag start
-let minRightPx = 200
-let minLeftPx  = 200
-
-function computeMinLeftPx() {
-  if (nodes.value.length === 0) return 200
-  let maxRight
-  if (diagramType.value === 'sequence') {
-    // Canvas constants: SEQ_OFFSET_X=100, SEQ_PARTICIPANT_SPACING=160, NODE_W/2=60
-    maxRight = 100 + (nodes.value.length - 1) * 160 + 60
-  } else {
-    // NODE_W/2 = 60 — rightmost edge of the widest node
-    maxRight = Math.max(...nodes.value.map(n => (n.x || 0) + 60))
-  }
-  return Math.max(maxRight + 48, 200) // 48px breathing room
-}
+// Both panels support horizontal scrolling, so only enforce a small fixed minimum.
+const MIN_PANEL_PX = 200
 
 function onDividerMousedown(e) {
   isResizing.value = true
   e.preventDefault()
-  // Right minimum: mermaid sets style.maxWidth on the SVG to its natural render width
-  const svgEl = previewRef.value?.containerRef?.querySelector('svg')
-  if (svgEl) {
-    const naturalW = parseFloat(svgEl.style.maxWidth) || svgEl.getBoundingClientRect().width
-    minRightPx = Math.max(naturalW + 48, 200)
-  } else {
-    minRightPx = 200
-  }
-  // Left minimum: rightmost node extent + margin
-  minLeftPx = computeMinLeftPx()
 }
 function onGlobalMousemove(e) {
   if (!isResizing.value || !mainRef.value) return
   const rect = mainRef.value.getBoundingClientRect()
   const DIVIDER_W = 6
-  const minLeftPct  = (minLeftPx  / rect.width) * 100
-  const maxLeftPct  = ((rect.width - minRightPx - DIVIDER_W) / rect.width) * 100
+  const minPct = (MIN_PANEL_PX / rect.width) * 100
+  const maxPct = ((rect.width - MIN_PANEL_PX - DIVIDER_W) / rect.width) * 100
   const pct = ((e.clientX - rect.left) / rect.width) * 100
-  leftPct.value = Math.min(Math.max(pct, Math.max(minLeftPct, 20)), Math.max(maxLeftPct, 20))
+  leftPct.value = Math.min(Math.max(pct, minPct), maxPct)
 }
 function onGlobalMouseup() {
   isResizing.value = false

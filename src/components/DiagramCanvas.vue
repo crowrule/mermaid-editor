@@ -310,11 +310,13 @@ const isSequence = computed(() => props.diagramType === 'sequence')
 const seqBodyHeight = computed(() =>
   SEQ_BODY_PADDING + props.seqFlowCount * props.seqFlowSpacing + 40
 )
+// Minimum canvas width = 2 participants wide
+const SEQ_MIN_CANVAS_WIDTH = SEQ_OFFSET_X + SEQ_PARTICIPANT_SPACING + NODE_W / 2 + 40  // 400px
 // Participant / message drawing area width
 const seqBodyWidth = computed(() => {
   const n = props.nodes.length
-  if (n === 0) return 400
-  return SEQ_OFFSET_X + (n - 1) * SEQ_PARTICIPANT_SPACING + NODE_W + 80
+  const natural = SEQ_OFFSET_X + Math.max(n - 1, 0) * SEQ_PARTICIPANT_SPACING + NODE_W / 2 + 40
+  return Math.max(natural, SEQ_MIN_CANVAS_WIDTH)
 })
 // Total SVG width: adds right column for region labels when regions exist
 const seqCanvasWidth = computed(() =>
@@ -947,12 +949,17 @@ function onKeyDown(e) {
   <!-- ── SEQUENCE: sticky header + scrollable body ───────────────────────────── -->
   <template v-if="isSequence">
 
-    <!-- Fixed header: participant/actor boxes + lifeline stubs -->
-    <div class="flex-shrink-0 overflow-hidden bg-gray-950"
+    <!-- Single scroll container: sticky header + scrollable body -->
+    <div class="flex-1 overflow-auto bg-gray-950"
          :style="{ cursor: mode === 'add' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default' }">
+      <div :style="{ width: seqCanvasWidth + 'px', minWidth: '100%' }">
+
+    <!-- Sticky participant header -->
+    <div style="position:sticky;top:0;z-index:10;background:#030712"
+         @mousedown="onHeaderMousedown">
       <svg ref="headerSvgRef" :width="seqCanvasWidth" :height="SEQ_MESSAGE_START_Y" style="display:block">
         <rect x="0" y="0" :width="seqCanvasWidth" :height="SEQ_MESSAGE_START_Y"
-              fill="transparent" @mousedown="onHeaderMousedown" />
+              fill="transparent" @mousedown.stop="onHeaderMousedown" />
         <!-- lifeline stubs (top portion) -->
         <line v-for="node in nodes" :key="'hlife-' + node.id"
               :x1="seqX(node)" :y1="SEQ_LIFELINE_TOP"
@@ -1009,8 +1016,7 @@ function onKeyDown(e) {
       </svg>
     </div>
 
-    <!-- Scrollable body: lifelines + slot circles + edges -->
-    <div class="flex-1 overflow-y-auto overflow-x-auto bg-gray-950">
+    <!-- Body SVG -->
       <svg ref="svgRef" :width="seqCanvasWidth" :height="seqBodyHeight" style="display:block;outline:none"
            :style="{ cursor: mode === 'connect' ? 'cell' : 'default' }"
            tabindex="0"
@@ -1262,7 +1268,8 @@ function onKeyDown(e) {
           </div>
         </foreignObject>
       </svg>
-    </div>
+    </div><!-- /inner width div -->
+    </div><!-- /outer scroll container -->
 
   </template>
 
