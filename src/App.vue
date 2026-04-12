@@ -238,7 +238,7 @@ function handleCodeChange(code) {
   <div class="flex flex-col h-screen bg-gray-900 text-gray-100">
     <!-- ── header ── -->
     <header class="flex items-center gap-4 px-4 py-2 bg-gray-800 border-b border-gray-700 shrink-0">
-      <h1 class="text-xl font-bold text-indigo-400 tracking-wide">Mermaid Editor</h1>
+      <h1 class="text-xl font-bold text-indigo-400 tracking-wide">Mermaid Editor <span class="text-gray-400 font-normal text-sm">(dev)</span></h1>
 
       <select
         :value="diagramType"
