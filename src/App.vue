@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { generateCode } from './components/codeGenerator.js'
 import VisualEditor from './components/VisualEditor.vue'
 import DiagramPreview from './components/DiagramPreview.vue'
@@ -16,6 +16,31 @@ const regions    = ref([])
 const diagramCode = ref('')
 const rightTab = ref('preview')
 const previewRef = ref(null)
+
+// ── clear confirmation ────────────────────────────────────────────────────────
+const showClearConfirm = ref(false)
+
+function requestClear() {
+  showClearConfirm.value = true
+}
+
+function confirmClear() {
+  showClearConfirm.value = false
+  nodes.value       = []
+  edges.value       = []
+  activations.value = []
+  regions.value     = []
+  nodeIdCounter       = 1
+  edgeIdCounter       = 1
+  activationIdCounter = 1
+  regionIdCounter     = 1
+  diagramDirection.value = 'TD'
+  seqAutoNumber.value    = false
+}
+
+function cancelClear() {
+  showClearConfirm.value = false
+}
 
 // ── diagram type change confirmation ──────────────────────────────────────────
 const pendingDiagramType = ref(null)
@@ -72,10 +97,12 @@ function onGlobalMouseup() {
 onMounted(() => {
   window.addEventListener('mousemove', onGlobalMousemove)
   window.addEventListener('mouseup', onGlobalMouseup)
+  document.addEventListener('mousedown', onLangMenuClickOutside)
 })
 onUnmounted(() => {
   window.removeEventListener('mousemove', onGlobalMousemove)
   window.removeEventListener('mouseup', onGlobalMouseup)
+  document.removeEventListener('mousedown', onLangMenuClickOutside)
 })
 
 // Auto-generate mermaid code whenever visual state changes
@@ -232,6 +259,109 @@ function handleDeleteActivation(id) {
 function handleCodeChange(code) {
   diagramCode.value = code
 }
+
+// ── save / open ───────────────────────────────────────────────────────────────
+async function saveCode() {
+  if (window.showSaveFilePicker) {
+    try {
+      const handle = await window.showSaveFilePicker({
+        suggestedName: 'diagram.mermaid',
+        types: [{ description: 'Mermaid Diagram', accept: { 'text/plain': ['.mermaid'] } }],
+      })
+      const writable = await handle.createWritable()
+      await writable.write(diagramCode.value)
+      await writable.close()
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error(e)
+    }
+  } else {
+    // Fallback: download via anchor
+    const blob = new Blob([diagramCode.value], { type: 'text/plain;charset=utf-8' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href = url; a.download = 'diagram.mermaid'; a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 100)
+  }
+}
+
+function openCode() {
+  if (window.showOpenFilePicker) {
+    window.showOpenFilePicker({
+      types: [{ description: 'Mermaid Diagram', accept: { 'text/plain': ['.mermaid', '.md', '.txt'] } }],
+      multiple: false,
+    }).then(async ([handle]) => {
+      const file = await handle.getFile()
+      diagramCode.value = await file.text()
+    }).catch(e => { if (e.name !== 'AbortError') console.error(e) })
+  } else {
+    // Fallback: hidden file input
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.mermaid,.md,.txt'
+    input.onchange = async () => {
+      if (!input.files?.[0]) return
+      diagramCode.value = await input.files[0].text()
+    }
+    input.click()
+  }
+}
+
+// ── i18n ──────────────────────────────────────────────────────────────────────
+const TRANSLATIONS = {
+  ko: {
+    clearTitle:        '캔버스 초기화',
+    clearBody:         '현재 캔버스에 그려진 내용이 모두 삭제됩니다.\n계속 하시겠습니까?',
+    clearCancel:       '취소',
+    clearConfirm:      '초기화',
+    typeChangeTitle:   '다이어그램 종류 변경',
+    typeChangeBody:    '현재 캔버스에 그려진 내용이 모두 삭제됩니다.\n계속 하시겠습니까?',
+    typeChangeCancel:  '취소',
+    typeChangeConfirm: '확인',
+  },
+  en: {
+    clearTitle:        'Clear Canvas',
+    clearBody:         'All content on the canvas will be deleted.\nDo you want to continue?',
+    clearCancel:       'Cancel',
+    clearConfirm:      'Clear',
+    typeChangeTitle:   'Change Diagram Type',
+    typeChangeBody:    'All content on the canvas will be deleted.\nDo you want to continue?',
+    typeChangeCancel:  'Cancel',
+    typeChangeConfirm: 'Confirm',
+  },
+  es: {
+    clearTitle:        'Limpiar lienzo',
+    clearBody:         'Todo el contenido del lienzo será eliminado.\n¿Deseas continuar?',
+    clearCancel:       'Cancelar',
+    clearConfirm:      'Limpiar',
+    typeChangeTitle:   'Cambiar tipo de diagrama',
+    typeChangeBody:    'Todo el contenido del lienzo será eliminado.\n¿Deseas continuar?',
+    typeChangeCancel:  'Cancelar',
+    typeChangeConfirm: 'Confirmar',
+  },
+}
+
+const lang = ref('en')
+const showLangMenu = ref(false)
+const langMenuRef  = ref(null)
+
+const t = computed(() => TRANSLATIONS[lang.value])
+
+const LANG_OPTIONS = [
+  { value: 'en', label: 'English' },
+  { value: 'es', label: 'Español' },
+  { value: 'ko', label: '한국어' },
+]
+
+function selectLang(value) {
+  lang.value = value
+  showLangMenu.value = false
+}
+
+function onLangMenuClickOutside(e) {
+  if (langMenuRef.value && !langMenuRef.value.contains(e.target)) {
+    showLangMenu.value = false
+  }
+}
 </script>
 
 <template>
@@ -251,7 +381,43 @@ function handleCodeChange(code) {
         <option value="class">Class Diagram</option>
       </select>
 
-      <ToolBar :preview-ref="previewRef" class="ml-auto" />
+      <!-- ── language selector ── -->
+      <div ref="langMenuRef" class="relative">
+        <button
+          @click="showLangMenu = !showLangMenu"
+          class="flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
+          title="Language"
+        >
+          <!-- Globe SVG -->
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+               class="w-5 h-5">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M2 12h20"/>
+            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/>
+          </svg>
+        </button>
+
+        <Transition name="fade">
+          <div
+            v-if="showLangMenu"
+            class="absolute left-0 top-full mt-1 z-30 min-w-[120px] bg-gray-800 border border-gray-600 rounded-lg shadow-xl overflow-hidden"
+          >
+            <button
+              v-for="opt in LANG_OPTIONS"
+              :key="opt.value"
+              @click="selectLang(opt.value)"
+              :class="[
+                'w-full text-left px-4 py-2 text-sm transition-colors',
+                lang === opt.value  /* template auto-unwraps ref */
+                  ? 'bg-indigo-700 text-white'
+                  : 'text-gray-300 hover:bg-gray-700'
+              ]"
+            >{{ opt.label }}</button>
+          </div>
+        </Transition>
+      </div>
+
     </header>
 
     <!-- ── main split ── -->
@@ -267,6 +433,7 @@ function handleCodeChange(code) {
         :diagram-type="diagramType"
         :diagram-direction="diagramDirection"
         :seq-auto-number="seqAutoNumber"
+        :lang="lang"
         :nodes="nodes"
         :edges="edges"
         :activations="activations"
@@ -289,6 +456,7 @@ function handleCodeChange(code) {
         @add-region="handleAddRegion"
         @update-region="handleUpdateRegion"
         @delete-region="handleDeleteRegion"
+        @clear="requestClear"
       />
 
       <!-- Draggable divider -->
@@ -301,7 +469,7 @@ function handleCodeChange(code) {
       <!-- Right: Preview / Code tabs -->
       <div class="flex flex-col flex-1 min-w-0 overflow-hidden">
         <!-- tab bar -->
-        <div class="flex bg-gray-800 border-b border-gray-700 shrink-0">
+        <div class="flex items-center bg-gray-800 border-b border-gray-700 shrink-0">
           <button
             @click="rightTab = 'preview'"
             :class="[
@@ -320,6 +488,23 @@ function handleCodeChange(code) {
                 : 'text-gray-400 hover:text-gray-200'
             ]"
           >Code</button>
+
+          <!-- tab-contextual action buttons -->
+          <div class="ml-auto flex items-center gap-2 pr-3">
+            <template v-if="rightTab === 'preview'">
+              <ToolBar :preview-ref="previewRef" />
+            </template>
+            <template v-else>
+              <button
+                @click="openCode"
+                class="px-3 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+              >Open</button>
+              <button
+                @click="saveCode"
+                class="px-3 py-1 text-xs rounded bg-indigo-700 text-white hover:bg-indigo-600 transition-colors"
+              >Save</button>
+            </template>
+          </div>
         </div>
 
         <!-- panel content -->
@@ -338,6 +523,30 @@ function handleCodeChange(code) {
       </div>
     </main>
 
+    <!-- ── clear confirmation modal ── -->
+    <Transition name="fade">
+      <div
+        v-if="showClearConfirm"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+        @click.self="cancelClear"
+      >
+        <div class="bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 p-6 flex flex-col gap-4">
+          <h2 class="text-base font-semibold text-gray-100">{{ t.clearTitle }}</h2>
+          <p class="text-sm text-gray-400 leading-relaxed whitespace-pre-line">{{ t.clearBody }}</p>
+          <div class="flex justify-end gap-2">
+            <button
+              @click="cancelClear"
+              class="px-4 py-1.5 text-sm rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+            >{{ t.clearCancel }}</button>
+            <button
+              @click="confirmClear"
+              class="px-4 py-1.5 text-sm rounded bg-red-700 text-white hover:bg-red-600 transition-colors"
+            >{{ t.clearConfirm }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
     <!-- ── diagram type change confirmation modal ── -->
     <Transition name="fade">
       <div
@@ -346,20 +555,17 @@ function handleCodeChange(code) {
         @click.self="cancelDiagramTypeChange"
       >
         <div class="bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 p-6 flex flex-col gap-4">
-          <h2 class="text-base font-semibold text-gray-100">다이어그램 종류 변경</h2>
-          <p class="text-sm text-gray-400 leading-relaxed">
-            현재 캔버스에 그려진 내용이 모두 삭제됩니다.<br>
-            계속 하시겠습니까?
-          </p>
+          <h2 class="text-base font-semibold text-gray-100">{{ t.typeChangeTitle }}</h2>
+          <p class="text-sm text-gray-400 leading-relaxed whitespace-pre-line">{{ t.typeChangeBody }}</p>
           <div class="flex justify-end gap-2">
             <button
               @click="cancelDiagramTypeChange"
               class="px-4 py-1.5 text-sm rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
-            >취소</button>
+            >{{ t.typeChangeCancel }}</button>
             <button
               @click="confirmDiagramTypeChange"
               class="px-4 py-1.5 text-sm rounded bg-indigo-600 text-white hover:bg-indigo-500 transition-colors"
-            >확인</button>
+            >{{ t.typeChangeConfirm }}</button>
           </div>
         </div>
       </div>

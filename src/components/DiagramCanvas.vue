@@ -12,6 +12,7 @@ const props = defineProps({
   selectedEdgeType: { type: String, default: 'arrow' },
   seqFlowCount:   { type: Number, default: 10 },
   seqFlowSpacing: { type: Number, default: 50 },
+  lang:           { type: String, default: 'en' },
 })
 
 const emit = defineEmits([
@@ -302,6 +303,26 @@ function entityHeight(node) {
 function erEntityCenter(node) {
   return { x: node.x, y: node.y + (node.attributes?.length || 0) * 10 }
 }
+
+// ── empty state hints ─────────────────────────────────────────────────────────
+const EMPTY_HINTS = {
+  en: {
+    seq:    'In Add mode, click to add Participant / Actor',
+    other:  'Select a node type and click "Add" mode, then click here to place nodes',
+  },
+  es: {
+    seq:    'En modo Add, haz clic para añadir Participant / Actor',
+    other:  'Selecciona un tipo de nodo, activa el modo "Add" y haz clic aquí',
+  },
+  ko: {
+    seq:    'Add 모드에서 클릭해서 Participant / Actor 추가',
+    other:  '노드 유형을 선택하고 Add 모드에서 클릭해서 배치',
+  },
+}
+const emptyHint = computed(() => {
+  const h = EMPTY_HINTS[props.lang] ?? EMPTY_HINTS.en
+  return props.diagramType === 'sequence' ? h.seq : h.other
+})
 
 // ── sequence layout helpers ───────────────────────────────────────────────────
 const isSequence = computed(() => props.diagramType === 'sequence')
@@ -999,7 +1020,7 @@ function onKeyDown(e) {
         <!-- empty state hint in header -->
         <text v-if="nodes.length === 0" x="50%" y="55%"
               fill="#4b5563" font-size="14" text-anchor="middle" dominant-baseline="middle"
-              pointer-events="none">Add 모드에서 클릭해서 Participant / Actor 추가</text>
+              pointer-events="none">{{ emptyHint }}</text>
         <!-- inline label editor (participants) -->
         <foreignObject v-if="editingNodeId !== null"
           :x="(seqX(nodes.find(n => n.id === editingNodeId)) || 0) - NODE_W / 2"
@@ -1706,7 +1727,7 @@ function onKeyDown(e) {
       text-anchor="middle"
       dominant-baseline="middle"
       pointer-events="none"
-    >Select a node type and click "Add" mode, then click here to place nodes</text>
+    >{{ emptyHint }}</text>
   </svg>
 
   <!-- ── ER relation cardinality context menu ── -->

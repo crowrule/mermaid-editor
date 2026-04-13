@@ -10,6 +10,7 @@ const props = defineProps({
   edges:       { type: Array, required: true },
   activations: { type: Array, default: () => [] },
   regions:     { type: Array, default: () => [] },
+  lang:        { type: String, default: 'en' },
 })
 
 const emit = defineEmits([
@@ -20,6 +21,7 @@ const emit = defineEmits([
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
+  'clear',
 ])
 
 const mode = ref('add')
@@ -124,6 +126,39 @@ function onInsertSlot(slotIdx, position) {
 function onAddRegion(startSlot, endSlot, type, label) { emit('add-region', startSlot, endSlot, type, label) }
 function onUpdateRegion(id, updates) { emit('update-region', id, updates) }
 function onDeleteRegion(id) { emit('delete-region', id) }
+
+// ── hint i18n ─────────────────────────────────────────────────────────────────
+const HINTS = {
+  en: {
+    add:          'Click to place node',
+    connectSeq:   'Click flow dot → click another participant\'s flow dot',
+    connect:      'Click source → then destination node',
+    delete:       'Click to delete · Del key',
+    select:       'Drag to move · Double-click to rename · Del key',
+  },
+  es: {
+    add:          'Clic para colocar nodo',
+    connectSeq:   'Clic en punto → clic en otro participante',
+    connect:      'Clic en origen → luego nodo destino',
+    delete:       'Clic para eliminar · tecla Del',
+    select:       'Arrastrar para mover · doble clic para renombrar · tecla Del',
+  },
+  ko: {
+    add:          '클릭해서 노드 배치',
+    connectSeq:   '흐름 점 클릭 → 다른 참가자 흐름 점 클릭',
+    connect:      '출발 → 도착 노드 순서로 클릭',
+    delete:       '클릭해서 삭제 · Del 키',
+    select:       '드래그로 이동 · 더블클릭 이름 변경 · Del 키',
+  },
+}
+
+const hint = computed(() => {
+  const h = HINTS[props.lang] ?? HINTS.en
+  if (mode.value === 'add')     return h.add
+  if (mode.value === 'delete')  return h.delete
+  if (mode.value === 'connect') return props.diagramType === 'sequence' ? h.connectSeq : h.connect
+  return h.select
+})
 
 // ── button class helpers ──────────────────────────────────────────────────────
 function modeClass(m) {
@@ -232,16 +267,14 @@ function directionClass(d) {
           <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('delete')]"  @click="mode = 'delete'">✕ Delete</button>
         </div>
 
+        <!-- clear button -->
+        <button
+          @click="emit('clear')"
+          class="ml-auto px-2.5 py-1 text-xs rounded bg-red-900/60 text-red-300 hover:bg-red-800 transition-colors whitespace-nowrap"
+        >✕ Clear</button>
+
         <!-- hint -->
-        <span class="ml-auto text-xs text-gray-500 whitespace-nowrap">
-          <template v-if="mode === 'add'">클릭해서 노드 배치</template>
-          <template v-else-if="mode === 'connect'">
-            <template v-if="diagramType === 'sequence'">흐름 점 클릭 → 다른 참가자 흐름 점 클릭</template>
-            <template v-else>출발 → 도착 노드 순서로 클릭</template>
-          </template>
-          <template v-else-if="mode === 'delete'">클릭해서 삭제 · Del 키</template>
-          <template v-else>드래그로 이동 · 더블클릭 이름 변경 · Del 키</template>
-        </span>
+        <span class="text-xs text-gray-500 whitespace-nowrap">{{ hint }}</span>
       </div>
     </div>
 
@@ -258,6 +291,7 @@ function directionClass(d) {
         :selected-edge-type="selectedEdgeType"
         :seq-flow-count="seqFlowCount"
         :seq-flow-spacing="seqFlowSpacing"
+        :lang="lang"
         @add-node="onAddNode"
         @move-node="onMoveNode"
         @add-edge="onAddEdge"
