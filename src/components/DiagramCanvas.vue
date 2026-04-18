@@ -62,8 +62,52 @@ const REGION_TYPES = [
   { type: 'opt',      label: 'opt',      fill: '#14532d', stroke: '#4ade80' },
   { type: 'loop',     label: 'loop',     fill: '#164e63', stroke: '#22d3ee' },
 ]
+// Brighter inner-region colors (used when depth > 0)
+const REGION_INNER_COLORS = {
+  rect:     { fill: '#0f766e', stroke: '#5eead4' },
+  alt:      { fill: '#4c1d95', stroke: '#d8b4fe' },
+  par:      { fill: '#1d4ed8', stroke: '#93c5fd' },
+  critical: { fill: '#b91c1c', stroke: '#fca5a5' },
+  break:    { fill: '#c2410c', stroke: '#fdba74' },
+  opt:      { fill: '#15803d', stroke: '#86efac' },
+  loop:     { fill: '#0e7490', stroke: '#67e8f9' },
+}
+const REGION_INDENT = 14   // px indented per nesting depth (each side)
+
 function regionTypeInfo(type) {
   return REGION_TYPES.find(r => r.type === type) ?? REGION_TYPES[0]
+}
+
+// depth: how many other regions fully contain this one
+const regionDepths = computed(() => {
+  const map = new Map()
+  for (const r of props.regions) {
+    let depth = 0
+    for (const other of props.regions) {
+      if (other.id !== r.id &&
+          other.startSlot <= r.startSlot &&
+          r.endSlot <= other.endSlot) depth++
+    }
+    map.set(r.id, depth)
+  }
+  return map
+})
+
+// returns fill/stroke for a region based on its nesting depth
+function regionStyle(region) {
+  const depth = regionDepths.value.get(region.id) ?? 0
+  if (depth === 0) return regionTypeInfo(region.type)
+  const inner = REGION_INNER_COLORS[region.type]
+  return inner ?? regionTypeInfo(region.type)
+}
+
+// returns layout {left, right, width} for a region based on nesting depth
+function rLayout(region) {
+  const depth = regionDepths.value.get(region.id) ?? 0
+  const dx    = depth * REGION_INDENT
+  const left  = 10 + dx
+  const right = seqBodyWidth.value - 10 - dx
+  return { left, right, width: right - left }
 }
 
 // ── constants ────────────────────────────────────────────────────────────────
@@ -305,6 +349,13 @@ function erEntityCenter(node) {
 }
 
 // ── empty state hints ─────────────────────────────────────────────────────────
+const REGION_MENU_I18N = {
+  en: { changeType: 'Change Type', selectType: 'Select Region Type', delete: 'Delete' },
+  es: { changeType: 'Cambiar tipo', selectType: 'Seleccionar tipo',  delete: 'Eliminar' },
+  ko: { changeType: '타입 변경',    selectType: '구역 타입 선택',     delete: '삭제' },
+}
+const regionMenuI18n = computed(() => REGION_MENU_I18N[props.lang] ?? REGION_MENU_I18N.en)
+
 const EMPTY_HINTS = {
   en: {
     seq:    'In Add mode, click to add Participant / Actor',
@@ -737,6 +788,12 @@ function onSelfLoop() {
 }
 
 // ── region functions ──────────────────────────────────────────────────────────
+function onRegionMenuDelete() {
+  if (!regionMenu.value?.targetRegionId) return
+  emit('delete-region', regionMenu.value.targetRegionId)
+  regionMenu.value = null
+}
+
 function onRegionMenuSelect(type) {
   if (!regionMenu.value) return
   if (regionMenu.value.targetRegionId !== null) {
@@ -1063,15 +1120,15 @@ function onKeyDown(e) {
           <template v-for="(sec, si) in sectionBounds(region)" :key="'rsec-' + region.id + '-' + si">
             <!-- section background rect -->
             <rect
-              :x="10"
+              :x="rLayout(region).left"
               :y="sec.topY"
-              :width="seqBodyWidth - 20"
+              :width="rLayout(region).width"
               :height="sec.height"
-              :fill="regionTypeInfo(region.type).fill"
-              fill-opacity="0.25"
-              :stroke="regionTypeInfo(region.type).stroke"
+              :fill="regionStyle(region).fill"
+              :fill-opacity="(regionDepths.get(region.id) ?? 0) > 0 ? 0.35 : 0.25"
+              :stroke="regionStyle(region).stroke"
               stroke-width="1.5"
-              stroke-dasharray="6 4"
+              :stroke-dasharray="(regionDepths.get(region.id) ?? 0) > 0 ? '4 3' : '6 4'"
               rx="4"
               style="cursor:pointer"
               @mousedown.stop="sec.isMain ? onRegionClick(region, $event) : $event.stopPropagation()"
@@ -1080,14 +1137,14 @@ function onKeyDown(e) {
             <g style="cursor:pointer"
                @mousedown.stop="sec.isMain ? onRegionTypeClick(region, $event) : onDividerBadgeMousedown(region, sec.div, $event)">
               <rect
-                :x="14"
+                :x="rLayout(region).left + 4"
                 :y="sec.topY + 4"
                 :width="sec.keyword.length * 7 + 10" height="16" rx="3"
-                :fill="regionTypeInfo(region.type).stroke"
+                :fill="regionStyle(region).stroke"
                 :fill-opacity="!sec.isMain && dividerCtxMenu?.divId === sec.div?.id ? 1 : 0.85"
               />
               <text
-                :x="14 + (sec.keyword.length * 7 + 10) / 2"
+                :x="rLayout(region).left + 4 + (sec.keyword.length * 7 + 10) / 2"
                 :y="sec.topY + 15"
                 fill="white" font-size="10" text-anchor="middle"
                 font-weight="bold" pointer-events="none"
@@ -1097,27 +1154,27 @@ function onKeyDown(e) {
             <template v-if="!sec.isMain && sec.div">
               <g style="cursor:ns-resize" @mousedown.stop="onDividerMousedown(region, sec.div, $event)">
                 <line
-                  :x1="14" :y1="sec.topY"
-                  :x2="seqBodyWidth - 14" :y2="sec.topY"
+                  :x1="rLayout(region).left + 4" :y1="sec.topY"
+                  :x2="rLayout(region).right - 4" :y2="sec.topY"
                   stroke="transparent" stroke-width="16"
                 />
                 <line
-                  :x1="14" :y1="sec.topY"
-                  :x2="seqBodyWidth - 14" :y2="sec.topY"
-                  :stroke="draggingDivId === sec.div.id ? '#f59e0b' : regionTypeInfo(region.type).stroke"
+                  :x1="rLayout(region).left + 4" :y1="sec.topY"
+                  :x2="rLayout(region).right - 4" :y2="sec.topY"
+                  :stroke="draggingDivId === sec.div.id ? '#f59e0b' : regionStyle(region).stroke"
                   :stroke-width="draggingDivId === sec.div.id ? 2 : 1"
                   stroke-dasharray="4 3"
                 />
               </g>
               <text v-if="editingDividerId !== sec.div.id"
-                :x="14 + dividerKeyword(region.type).length * 7 + 16"
+                :x="rLayout(region).left + 4 + dividerKeyword(region.type).length * 7 + 16"
                 :y="sec.topY + 15"
-                :fill="regionTypeInfo(region.type).stroke"
+                :fill="regionStyle(region).stroke"
                 font-size="10" style="cursor:text"
                 @dblclick.stop="startDividerLabelEdit(region, sec.div, $event)"
               >{{ sec.div.label || '...' }}</text>
               <foreignObject v-if="editingDividerId === sec.div.id"
-                :x="14 + dividerKeyword(region.type).length * 7 + 16"
+                :x="rLayout(region).left + 4 + dividerKeyword(region.type).length * 7 + 16"
                 :y="sec.topY + 5"
                 width="130" height="16">
                 <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
@@ -1136,13 +1193,13 @@ function onKeyDown(e) {
             :y1="regionY(region) + regionHeight(region) / 2"
             :x2="seqBodyWidth + 12"
             :y2="regionY(region) + regionHeight(region) / 2"
-            :stroke="regionTypeInfo(region.type).stroke"
+            :stroke="regionStyle(region).stroke"
             stroke-width="1" stroke-dasharray="3 2" opacity="0.7"
           />
           <text v-if="editingRegionId !== region.id"
             :x="seqBodyWidth + 18"
             :y="regionY(region) + regionHeight(region) / 2 + 4"
-            :fill="regionTypeInfo(region.type).stroke"
+            :fill="regionStyle(region).stroke"
             font-size="12" text-anchor="start"
             style="cursor:text"
             @dblclick.stop="startRegionLabelEdit(region)"
@@ -1162,25 +1219,25 @@ function onKeyDown(e) {
           <!-- bottom border — full-width drag handle -->
           <g style="cursor:ns-resize" @mousedown.stop="onResizeHandleDown(region, $event)">
             <line
-              :x1="10" :y1="regionY(region) + regionHeight(region)"
-              :x2="seqBodyWidth - 10" :y2="regionY(region) + regionHeight(region)"
+              :x1="rLayout(region).left" :y1="regionY(region) + regionHeight(region)"
+              :x2="rLayout(region).right" :y2="regionY(region) + regionHeight(region)"
               stroke="transparent" stroke-width="16"
             />
             <rect
               :x="seqBodyWidth / 2 - 24"
               :y="regionY(region) + regionHeight(region) - 4"
               width="48" height="4" rx="2"
-              :fill="regionTypeInfo(region.type).stroke"
+              :fill="regionStyle(region).stroke"
               :fill-opacity="resizingRegionId === region.id ? 1 : 0.5"
             />
           </g>
           <!-- bottom delete badge (rendered above resize handle so click takes priority) -->
           <g style="cursor:pointer" @mousedown.stop="onRegionDeleteBadgeMousedown(region, $event)">
             <rect
-              :x="14"
+              :x="rLayout(region).left + 4"
               :y="regionY(region) + regionHeight(region) - 10"
               width="36" height="14" rx="3"
-              :fill="regionTypeInfo(region.type).stroke"
+              :fill="regionStyle(region).stroke"
               :fill-opacity="regionCtxMenu?.regionId === region.id ? 1 : 0.65"
             />
             <text
@@ -1836,7 +1893,7 @@ function onKeyDown(e) {
     @mousedown.stop
   >
     <div class="px-3 py-1.5 text-gray-400 border-b border-gray-700 select-none">
-      {{ regionMenu.targetRegionId !== null ? '타입 변경' : '구역 타입 선택' }}
+      {{ regionMenu.targetRegionId !== null ? regionMenuI18n.changeType : regionMenuI18n.selectType }}
     </div>
     <div
       v-for="rt in REGION_TYPES"
@@ -1857,6 +1914,17 @@ function onKeyDown(e) {
       >
         <span class="text-emerald-400">+</span>
         <span>add '{{ dividerKeyword(currentMenuRegion.type) }}'</span>
+      </div>
+    </template>
+    <!-- delete option (only when editing an existing region) -->
+    <template v-if="regionMenu.targetRegionId !== null">
+      <div class="border-t border-gray-700 my-0.5" />
+      <div
+        class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-red-400 hover:bg-gray-700 transition-colors"
+        @mousedown.stop="onRegionMenuDelete"
+      >
+        <span>✕</span>
+        <span>{{ regionMenuI18n.delete }}</span>
       </div>
     </template>
   </div>

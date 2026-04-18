@@ -10,7 +10,8 @@ const props = defineProps({
   edges:       { type: Array, required: true },
   activations: { type: Array, default: () => [] },
   regions:     { type: Array, default: () => [] },
-  lang:        { type: String, default: 'en' },
+  lang:             { type: String,  default: 'en' },
+  seqFlowCountInit: { type: Number,  default: null },
 })
 
 const emit = defineEmits([
@@ -97,8 +98,13 @@ const toolbarConfig = computed(() => {
   }
 })
 
-// ── reset selections when diagram type changes ────────────────────────────────
+// ── sync seqFlowCount when a file is loaded ───────────────────────────────────
 import { watch } from 'vue'
+watch(() => props.seqFlowCountInit, (v) => {
+  if (v != null && v > 0) seqFlowCount.value = v
+})
+
+// ── reset selections when diagram type changes ────────────────────────────────
 watch(() => props.diagramType, () => {
   const cfg = toolbarConfig.value
   selectedNodeType.value = cfg.nodeTypes[0]?.type || 'process'
