@@ -14,6 +14,7 @@ const nodes = ref([])
 const edges = ref([])
 const activations = ref([])
 const regions    = ref([])
+const subgraphs  = ref([])
 const diagramCode = ref('')
 const rightTab = ref('preview')
 const previewRef = ref(null)
@@ -37,10 +38,12 @@ function confirmClear() {
   edges.value       = []
   activations.value = []
   regions.value     = []
+  subgraphs.value   = []
   nodeIdCounter       = 1
   edgeIdCounter       = 1
   activationIdCounter = 1
   regionIdCounter     = 1
+  subgraphIdCounter   = 1
   diagramDirection.value = 'TD'
   seqAutoNumber.value    = false
 }
@@ -76,6 +79,7 @@ let nodeIdCounter = 1
 let edgeIdCounter = 1
 let activationIdCounter = 1
 let regionIdCounter    = 1
+let subgraphIdCounter  = 1
 
 // ── resizable divider ──────────────────────────────────────────────────────────
 const leftPct = ref(60)
@@ -113,13 +117,14 @@ onUnmounted(() => {
 })
 
 // Auto-generate mermaid code whenever visual state changes
-watch([diagramType, diagramDirection, seqAutoNumber, nodes, edges, activations, regions], () => {
+watch([diagramType, diagramDirection, seqAutoNumber, nodes, edges, activations, regions, subgraphs], () => {
   if (loadingFile) return
   diagramCode.value = generateCode(diagramType.value, nodes.value, edges.value, {
     direction:   diagramDirection.value,
     autonumber:  seqAutoNumber.value,
     activations: activations.value,
     regions:     regions.value,
+    subgraphs:   subgraphs.value,
   })
 }, { deep: true })
 
@@ -130,10 +135,12 @@ watch(diagramType, () => {
   edges.value       = []
   activations.value = []
   regions.value     = []
+  subgraphs.value   = []
   nodeIdCounter       = 1
   edgeIdCounter       = 1
   activationIdCounter = 1
   regionIdCounter     = 1
+  subgraphIdCounter   = 1
   diagramDirection.value = 'TD'
   seqAutoNumber.value    = false
 })
@@ -255,6 +262,17 @@ function handleUpdateRegion(id, updates) {
 
 function handleDeleteRegion(id) {
   regions.value = regions.value.filter(r => r.id !== id)
+}
+
+function handleAddSubgraph(x, y, width, height) {
+  subgraphs.value.push({ id: subgraphIdCounter++, label: `Group ${subgraphIdCounter - 1}`, x, y, width, height })
+}
+function handleUpdateSubgraph(id, updates) {
+  const sg = subgraphs.value.find(s => s.id === id)
+  if (sg) Object.assign(sg, updates)
+}
+function handleDeleteSubgraph(id) {
+  subgraphs.value = subgraphs.value.filter(s => s.id !== id)
 }
 
 function handleAddActivation(nodeId, startSlot, endSlot) {
@@ -500,6 +518,7 @@ function onLangMenuClickOutside(e) {
         :edges="edges"
         :activations="activations"
         :regions="regions"
+        :subgraphs="subgraphs"
         @add-node="handleAddNode"
         @move-node="handleMoveNode"
         @add-edge="handleAddEdge"
@@ -518,6 +537,9 @@ function onLangMenuClickOutside(e) {
         @add-region="handleAddRegion"
         @update-region="handleUpdateRegion"
         @delete-region="handleDeleteRegion"
+        @add-subgraph="handleAddSubgraph"
+        @update-subgraph="handleUpdateSubgraph"
+        @delete-subgraph="handleDeleteSubgraph"
         @clear="requestClear"
       />
 

@@ -32,44 +32,67 @@ function indexToLetter(i) {
   return result
 }
 
-function generateFlowchart(nodes, edges, direction) {
+function generateFlowchart(nodes, edges, direction, subgraphs = []) {
   const dir = direction || 'TD'
   if (nodes.length === 0) return `flowchart ${dir}`
   const lines = [`flowchart ${dir}`]
   const idMap = new Map() // node.id → mermaid letter ID
-  nodes.forEach((node, i) => {
-    const id = indexToLetter(i)
-    idMap.set(node.id, id)
+  nodes.forEach((node, i) => idMap.set(node.id, indexToLetter(i)))
+
+  function nodeDecl(node, indent) {
+    const id    = idMap.get(node.id)
     const label = node.label || id
+    let decl
     switch (node.type) {
-      case 'decision':
-        lines.push(`  ${id}{${label}}`)
-        break
-      case 'terminal':
-        lines.push(`  ${id}([${label}])`)
-        break
-      case 'io':
-        lines.push(`  ${id}[/${label}/]`)
-        break
-      case 'database':
-        lines.push(`  ${id}[(${label})]`)
-        break
-      case 'subprocess':
-        lines.push(`  ${id}[[${label}]]`)
-        break
-      case 'multiprocess':
-        lines.push(`  ${id}@{ shape: procs, label: "${label}" }`)
-        break
-      case 'reference':
-        lines.push(`  ${id}((${label}))`)
-        break
-      default: // process
-        lines.push(`  ${id}[${label}]`)
+      case 'decision':    decl = `${id}{${label}}`; break
+      case 'terminal':    decl = `${id}([${label}])`; break
+      case 'io':          decl = `${id}[/${label}/]`; break
+      case 'database':    decl = `${id}[(${label})]`; break
+      case 'subprocess':  decl = `${id}[[${label}]]`; break
+      case 'multiprocess':decl = `${id}@{ shape: procs, label: "${label}" }`; break
+      case 'reference':   decl = `${id}((${label}))`; break
+      default:            decl = `${id}[${label}]`
     }
+    lines.push(`${indent}${decl}`)
+  }
+
+  // Assign each node to the smallest subgraph that contains it
+  function smallestSg(node) {
+    let best = null
+    for (const sg of subgraphs) {
+      if (node.x >= sg.x && node.x <= sg.x + sg.width &&
+          node.y >= sg.y && node.y <= sg.y + sg.height) {
+        if (!best || sg.width * sg.height < best.width * best.height) best = sg
+      }
+    }
+    return best
+  }
+
+  const assignedNodeIds = new Set()
+
+  // Emit subgraph blocks (sorted largest-first so outer wraps inner)
+  const sortedSgs = [...subgraphs].sort((a, b) => b.width * b.height - a.width * a.height)
+  sortedSgs.forEach(sg => {
+    const sgId = `_sg${sg.id}`
+    lines.push(`  subgraph ${sgId} [${sg.label}]`)
+    nodes.forEach(node => {
+      if (smallestSg(node)?.id === sg.id) {
+        nodeDecl(node, '    ')
+        assignedNodeIds.add(node.id)
+      }
+    })
+    lines.push(`  end`)
   })
+
+  // Nodes not in any subgraph
+  nodes.forEach(node => {
+    if (!assignedNodeIds.has(node.id)) nodeDecl(node, '  ')
+  })
+
+  // All edges
   edges.forEach(edge => {
     const fromId = idMap.get(edge.from)
-    const toId = idMap.get(edge.to)
+    const toId   = idMap.get(edge.to)
     if (!fromId || !toId) return
     const lbl = edge.label
     switch (edge.edgeType) {
@@ -241,6 +264,6 @@ export function generateCode(type, nodes, edges, options) {
     case 'sequence': return generateSequence(nodes, edges, options?.autonumber, options?.activations, options?.regions)
     case 'er':       return generateER(nodes, edges, dir)
     case 'class':    return generateClass(nodes, edges, dir)
-    default:         return generateFlowchart(nodes, edges, dir)
+    default:         return generateFlowchart(nodes, edges, dir, options?.subgraphs)
   }
 }

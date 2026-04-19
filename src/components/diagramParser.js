@@ -1,11 +1,23 @@
 // ── Auto-layout helpers ───────────────────────────────────────────────────────
-function autoLayoutGrid(nodes, colSpacingX = 200, rowSpacingY = 160, startX = 150, startY = 120) {
+// direction: 'TD' → rows go downward (left-to-right within row)
+//            'LR' → columns go rightward (top-to-bottom within column)
+function autoLayoutGrid(nodes, direction = 'TD', colSpacingX = 200, rowSpacingY = 150, startX = 150, startY = 120) {
   if (!nodes.length) return
-  const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length)))
-  nodes.forEach((node, i) => {
-    node.x = startX + (i % cols) * colSpacingX
-    node.y = startY + Math.floor(i / cols) * rowSpacingY
-  })
+  if (direction === 'LR') {
+    // LR: nodes spread left → right (wide layout), fill row by row
+    const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length)))
+    nodes.forEach((node, i) => {
+      node.x = startX + (i % cols) * colSpacingX
+      node.y = startY + Math.floor(i / cols) * rowSpacingY
+    })
+  } else {
+    // TD: nodes spread top → down (tall layout), fill column by column
+    const rows = Math.max(1, Math.ceil(Math.sqrt(nodes.length)))
+    nodes.forEach((node, i) => {
+      node.x = startX + Math.floor(i / rows) * colSpacingX
+      node.y = startY + (i % rows) * rowSpacingY
+    })
+  }
 }
 
 // ── Flowchart endpoint patterns (order matters: most specific first) ──────────
@@ -155,7 +167,7 @@ export function parseFlowchart(code) {
     if (!parsed) resultLines.push(`%% ${line}`)
   }
 
-  autoLayoutGrid(nodes, 200, 150)
+  autoLayoutGrid(nodes, direction, 200, 150)
 
   return {
     nodes, edges,
@@ -249,8 +261,17 @@ export function parseSequence(code) {
       resultLines.push(line); continue
     }
 
-    // Region starts (supported)
-    m = trimmed.match(/^(loop|alt|opt|par|critical)\s*(.*)$/i)
+    // Region starts: rect rgb(...) — supported, ignore color (editor uses fixed colors per depth)
+    if (/^rect\b/i.test(trimmed)) {
+      const region = { id: regionCounter++, type: 'rect', label: '', startSlot: slotCounter, endSlot: slotCounter, dividers: [] }
+      regions.push(region)
+      regionStack.push(region)
+      blockTypeStack.push('supported')
+      resultLines.push(line); continue
+    }
+
+    // Region starts: loop/alt/opt/par/critical/break — supported
+    m = trimmed.match(/^(loop|alt|opt|par|critical|break)\s*(.*)$/i)
     if (m) {
       const type   = m[1].toLowerCase()
       const label  = m[2].trim()
@@ -269,9 +290,9 @@ export function parseSequence(code) {
       resultLines.push(line); continue
     }
 
-    // Unsupported block openers: rect, break, box — comment out opener AND track depth
+    // Unsupported block openers: box — comment out opener AND track depth
     // so their matching `end` is also commented out.
-    if (/^(rect|break|box)\b/i.test(trimmed)) {
+    if (/^box\b/i.test(trimmed)) {
       blockTypeStack.push('unsupported')
       resultLines.push(`%% ${line}`); continue
     }
@@ -388,7 +409,7 @@ export function parseER(code) {
     i++
   }
 
-  autoLayoutGrid(nodes, 250, 200, 150, 150)
+  autoLayoutGrid(nodes, 'TD', 250, 200, 150, 150)
 
   return {
     nodes, edges,

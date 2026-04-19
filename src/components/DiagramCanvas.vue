@@ -6,6 +6,7 @@ const props = defineProps({
   edges:       { type: Array, required: true },
   activations: { type: Array, default: () => [] },
   regions:     { type: Array, default: () => [] },
+  subgraphs:   { type: Array, default: () => [] },
   diagramType:      { type: String, required: true },
   mode:             { type: String, default: 'select' },
   selectedNodeType: { type: String, default: 'process' },
@@ -22,6 +23,7 @@ const emit = defineEmits([
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
+  'add-subgraph', 'update-subgraph', 'delete-subgraph',
 ])
 
 // Cardinality options for each side of an ER relation
@@ -320,6 +322,14 @@ let   dividerDragStarted     = false
 const dividerCtxMenu = ref(null)  // { x, y, divId, regionId }
 const regionCtxMenu  = ref(null)  // { x, y, regionId }
 
+// ── subgraph (flowchart only) ─────────────────────────────────────────────────
+const selectedSgId    = ref(null)
+const editingSgId     = ref(null)
+const editSgLabel     = ref('')
+const editSgLabelRef  = ref(null)
+const sgDragPreview   = ref(null)  // { x, y, width, height } during draw
+let   sgDragStart     = null       // { x, y } anchor point
+
 const currentMenuRegion = computed(() =>
   regionMenu.value?.targetRegionId != null
     ? props.regions.find(r => r.id === regionMenu.value.targetRegionId) ?? null
@@ -466,6 +476,24 @@ function entityBoundaryPoint(cx, cy, ux, uy, halfW = NODE_W / 2, halfH = NODE_H 
   }
 }
 
+// Boundary point for flowchart node shapes in direction (ux, uy) from node center
+function fcNodeBoundaryPoint(node, ux, uy) {
+  const hw = NODE_W / 2, hh = NODE_H / 2
+  if (node.type === 'reference') {
+    // circle: radius = NODE_H / 2
+    return { x: node.x + hh * ux, y: node.y + hh * uy }
+  }
+  if (node.type === 'decision') {
+    // diamond: |x/hw| + |y/hh| = 1
+    const denom = Math.abs(ux) / hw + Math.abs(uy) / hh
+    if (denom < 0.0001) return { x: node.x, y: node.y }
+    const t = 1 / denom
+    return { x: node.x + t * ux, y: node.y + t * uy }
+  }
+  // rectangle family: process, terminal, subprocess, io, database, multiprocess, class
+  return entityBoundaryPoint(node.x, node.y, ux, uy)
+}
+
 function edgePath(edge) {
   const fromNode = props.nodes.find(n => n.id === edge.from)
   const toNode   = props.nodes.find(n => n.id === edge.to)
@@ -491,7 +519,14 @@ function edgePath(edge) {
     const tp = entityBoundaryPoint(tc.x, tc.y, -ux, -uy, NODE_W / 2, entityHeight(toNode) / 2)
     return `M${fp.x},${fp.y} L${tp.x},${tp.y}`
   }
-  return `M${fromNode.x},${fromNode.y} L${toNode.x},${toNode.y}`
+  // Flowchart: clip path at each node's boundary so arrowhead is visible
+  const dx = toNode.x - fromNode.x
+  const dy = toNode.y - fromNode.y
+  const len = Math.sqrt(dx * dx + dy * dy) || 1
+  const ux = dx / len, uy = dy / len
+  const fp = fcNodeBoundaryPoint(fromNode,  ux,  uy)
+  const tp = fcNodeBoundaryPoint(toNode,   -ux, -uy)
+  return `M${fp.x},${fp.y} L${tp.x},${tp.y}`
 }
 
 function edgeMidpoint(edge) {
@@ -547,7 +582,7 @@ function edgeMarkerEnd(edge) {
   if (props.diagramType !== 'er') {
     if (edge.edgeType === 'open') return ''
     if (edge.edgeType === 'cross') return 'url(#arrowCross)'
-    return 'url(#arrowHead)'
+    return selectedEdgeId.value === edge.id ? 'url(#arrowHeadSel)' : 'url(#arrowHead)'
   }
   const { right } = parseERSides(edge.edgeType)
   return ER_END_MARKER[right] ?? 'url(#er-e-zero-more)'
@@ -559,6 +594,7 @@ function edgeMarkerEnd(edge) {
 function onBgMousedown(e) {
   selectedId.value = null
   selectedEdgeId.value = null
+  selectedSgId.value = null
   connectSource.value = null
   addingAttrNodeId.value = null
   ctxEdgeId.value = null
@@ -572,6 +608,13 @@ function onBgMousedown(e) {
     regionDragStartSlot = Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing)
     regionDragStartY    = e.clientY
     regionDragStarted   = false
+    return
+  }
+
+  // Flowchart select: start subgraph drag-to-draw
+  if (!isSequence.value && props.mode === 'select') {
+    const pt = svgPoint(e)
+    sgDragStart = { x: pt.x, y: pt.y }
     return
   }
 
@@ -601,6 +644,7 @@ function onHeaderMousedown(e) {
 function onNodeDown(e, node) {
   e.stopPropagation()
   selectedEdgeId.value = null
+  selectedSgId.value = null
   if (addingAttrNodeId.value !== null && addingAttrNodeId.value !== node.id)
     addingAttrNodeId.value = null
 
@@ -650,6 +694,7 @@ function onEdgeClick(e, edge) {
   e.stopPropagation()
   ctxEdgeId.value = null
   addingAttrNodeId.value = null
+  selectedSgId.value = null
   if (props.mode === 'delete') {
     emit('delete-edge', edge.id)
     return
@@ -659,12 +704,30 @@ function onEdgeClick(e, edge) {
 }
 
 function onMouseMove(e) {
+  // Subgraph drag-to-draw preview
+  if (sgDragStart) {
+    const pt = svgPoint(e)
+    const x = Math.min(sgDragStart.x, pt.x)
+    const y = Math.min(sgDragStart.y, pt.y)
+    sgDragPreview.value = { x, y, width: Math.abs(pt.x - sgDragStart.x), height: Math.abs(pt.y - sgDragStart.y) }
+    return
+  }
   if (!dragging) return
   const pt = svgPoint(e)
   emit('move-node', dragging.id, pt.x - dragOffX, pt.y - dragOffY)
 }
 
 function onMouseUp() {
+  // Finalize subgraph creation
+  if (sgDragStart) {
+    const prev = sgDragPreview.value
+    if (prev && prev.width > 40 && prev.height > 40) {
+      emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
+    }
+    sgDragStart = null
+    sgDragPreview.value = null
+    return
+  }
   dragging = null
 }
 
@@ -988,13 +1051,45 @@ function onResizeHandleDown(region, e) {
   resizePreviewEndSlot.value = region.endSlot
 }
 
+// ── subgraph functions ────────────────────────────────────────────────────────
+function onSgMousedown(e, sg) {
+  e.stopPropagation()
+  editingSgId.value = null
+  if (props.mode === 'delete') {
+    emit('delete-subgraph', sg.id)
+    return
+  }
+  if (props.mode === 'select') {
+    selectedSgId.value = sg.id
+    selectedId.value   = null
+    selectedEdgeId.value = null
+  }
+}
+
+function startSgLabelEdit(sg) {
+  if (props.mode === 'delete') return
+  editingSgId.value = sg.id
+  editSgLabel.value = sg.label
+  nextTick(() => editSgLabelRef.value?.focus())
+}
+
+function commitSgLabel() {
+  if (editingSgId.value === null) return
+  emit('update-subgraph', editingSgId.value, { label: editSgLabel.value })
+  editingSgId.value = null
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (editingNodeId.value !== null)   return
     if (editingEdgeId.value !== null)   return
     if (addingAttrNodeId.value !== null) return
-    if (selectedId.value !== null) {
+    if (editingSgId.value !== null)     return
+    if (selectedSgId.value !== null) {
+      emit('delete-subgraph', selectedSgId.value)
+      selectedSgId.value = null
+    } else if (selectedId.value !== null) {
       emit('delete-node', selectedId.value)
       selectedId.value = null
     } else if (selectedEdgeId.value !== null) {
@@ -1006,6 +1101,10 @@ function onKeyDown(e) {
     connectSource.value       = null
     editingNodeId.value       = null
     editingEdgeId.value       = null
+    editingSgId.value         = null
+    selectedSgId.value        = null
+    sgDragStart               = null
+    sgDragPreview.value       = null
     editingRegionId.value     = null
     editingDividerId.value    = null
     draggingDivId.value       = null
@@ -1187,18 +1286,18 @@ function onKeyDown(e) {
               </foreignObject>
             </template>
           </template>
-          <!-- right-side label: connector line + display/edit -->
+          <!-- right-side label: connector line + display/edit (anchored to top) -->
           <line
             :x1="seqBodyWidth - 10"
-            :y1="regionY(region) + regionHeight(region) / 2"
+            :y1="regionY(region) + 12"
             :x2="seqBodyWidth + 12"
-            :y2="regionY(region) + regionHeight(region) / 2"
+            :y2="regionY(region) + 12"
             :stroke="regionStyle(region).stroke"
             stroke-width="1" stroke-dasharray="3 2" opacity="0.7"
           />
           <text v-if="editingRegionId !== region.id"
             :x="seqBodyWidth + 18"
-            :y="regionY(region) + regionHeight(region) / 2 + 4"
+            :y="regionY(region) + 16"
             :fill="regionStyle(region).stroke"
             font-size="12" text-anchor="start"
             style="cursor:text"
@@ -1206,7 +1305,7 @@ function onKeyDown(e) {
           >{{ region.label || 'what is this?' }}</text>
           <foreignObject v-if="editingRegionId === region.id"
             :x="seqBodyWidth + 14"
-            :y="regionY(region) + regionHeight(region) / 2 - 14"
+            :y="regionY(region) + 2"
             :width="REGION_LABEL_MARGIN - 24" height="28">
             <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
               <input ref="editRegionLabelRef" v-model="editRegionLabel"
@@ -1370,6 +1469,10 @@ function onKeyDown(e) {
               refX="9" refY="3.5" orient="auto">
         <polygon points="0 0, 10 3.5, 0 7" fill="#60a5fa" />
       </marker>
+      <marker id="arrowHeadSel" markerWidth="10" markerHeight="7"
+              refX="9" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" />
+      </marker>
       <marker id="arrowCross" markerWidth="10" markerHeight="10"
               refX="5" refY="5" orient="auto">
         <line x1="0" y1="0" x2="10" y2="10" stroke="#f87171" stroke-width="2"/>
@@ -1426,6 +1529,51 @@ function onKeyDown(e) {
       x="0" y="0" width="100%" height="100%"
       fill="transparent"
       @mousedown="onBgMousedown"
+    />
+
+    <!-- ── subgraphs (rendered behind edges and nodes) ── -->
+    <g v-for="sg in subgraphs" :key="'sg-' + sg.id"
+       @mousedown.stop="onSgMousedown($event, sg)"
+       @dblclick.stop="startSgLabelEdit(sg)">
+      <rect
+        :x="sg.x" :y="sg.y" :width="sg.width" :height="sg.height"
+        fill="rgba(99,102,241,0.1)"
+        :stroke="selectedSgId === sg.id ? '#f59e0b' : '#6366f1'"
+        :stroke-width="selectedSgId === sg.id ? 2 : 1.5"
+        stroke-dasharray="6 4"
+        rx="6"
+        :style="{ cursor: mode === 'delete' ? 'not-allowed' : mode === 'select' ? 'move' : 'default' }"
+      />
+      <!-- label badge -->
+      <rect v-if="editingSgId !== sg.id"
+        :x="sg.x + 6" :y="sg.y + 4"
+        :width="(sg.label || 'subgraph').length * 7 + 14" height="18"
+        rx="3" fill="#4338ca" fill-opacity="0.85"
+      />
+      <text v-if="editingSgId !== sg.id"
+        :x="sg.x + 13" :y="sg.y + 16"
+        fill="#c7d2fe" font-size="11" font-weight="bold" pointer-events="none"
+      >{{ sg.label || 'subgraph' }}</text>
+      <!-- inline label editor -->
+      <foreignObject v-if="editingSgId === sg.id"
+        :x="sg.x + 6" :y="sg.y + 4" width="160" height="20">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+          <input ref="editSgLabelRef" v-model="editSgLabel"
+                 @keydown.enter.stop="commitSgLabel"
+                 @keydown.escape.stop="editingSgId = null"
+                 @blur="commitSgLabel"
+                 style="width:100%;height:100%;background:#1e1b4b;color:#c7d2fe;border:1px solid #818cf8;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;" />
+        </div>
+      </foreignObject>
+    </g>
+
+    <!-- drag-to-draw preview -->
+    <rect v-if="sgDragPreview"
+      :x="sgDragPreview.x" :y="sgDragPreview.y"
+      :width="sgDragPreview.width" :height="sgDragPreview.height"
+      fill="rgba(99,102,241,0.07)"
+      stroke="#6366f1" stroke-width="1.5" stroke-dasharray="6 4"
+      rx="6" pointer-events="none"
     />
 
     <!-- ── edges ── -->
