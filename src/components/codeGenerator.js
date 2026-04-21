@@ -235,9 +235,12 @@ function generateER(nodes, edges, direction) {
 
 function generateClass(nodes, edges, direction) {
   const dir = direction || 'TD'
-  if (nodes.length === 0) return 'classDiagram'
+  // mermaid v11 requires at least one statement after classDiagram header;
+  // use direction as a minimal valid placeholder when the canvas is empty.
+  const mermaidDir = dir === 'TD' ? 'TB' : dir
+  if (nodes.length === 0) return `classDiagram\n  direction ${mermaidDir}`
   const lines = ['classDiagram']
-  if (dir !== 'TD') lines.push(`  direction ${dir}`)
+  if (dir !== 'TD') lines.push(`  direction ${mermaidDir}`)
   nodes.forEach(node => {
     lines.push(`  class ${node.label}`)
   })

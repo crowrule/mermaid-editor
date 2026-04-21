@@ -343,6 +343,22 @@ const editingEdge = computed(() =>
 // If the edge being edited disappears (e.g. deleted), cancel the edit
 watch(editingEdge, (e) => { if (editingEdgeId.value !== null && !e) editingEdgeId.value = null })
 
+// Reset all transient UI state when diagram type changes
+watch(() => props.diagramType, () => {
+  selectedId.value        = null
+  selectedEdgeId.value    = null
+  selectedSgId.value      = null
+  editingNodeId.value     = null
+  editingEdgeId.value     = null
+  editingSgId.value       = null
+  addingAttrNodeId.value  = null
+  connectSource.value     = null
+  ctxEdgeId.value         = null
+  regionMenu.value        = null
+  sgDragStart             = null
+  sgDragPreview.value     = null
+})
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 function svgPoint(e) {
   const rect = svgRef.value.getBoundingClientRect()
