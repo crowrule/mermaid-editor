@@ -169,6 +169,7 @@ function handleAddNode(x, y, type) {
     y,
   }
   if (type === 'entity') node.attributes = []
+  if (type === 'class') node.members = []
   nodes.value.push(node)
 }
 
@@ -183,6 +184,25 @@ function handleDeleteAttribute(nodeId, index) {
   const node = nodes.value.find(n => n.id === nodeId)
   if (!node || !node.attributes) return
   node.attributes.splice(index, 1)
+}
+
+function handleAddMember(nodeId, vis, type, name) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node) return
+  if (!node.members) node.members = []
+  node.members.push({ visibility: vis, type, name })
+}
+
+function handleUpdateMember(nodeId, index, vis, type, name) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node || !node.members) return
+  node.members[index] = { visibility: vis, type, name }
+}
+
+function handleDeleteMember(nodeId, index) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node || !node.members) return
+  node.members.splice(index, 1)
 }
 
 function handleMoveNode(id, x, y) {
@@ -529,6 +549,9 @@ function onLangMenuClickOutside(e) {
         @add-attribute="handleAddAttribute"
         @delete-attribute="handleDeleteAttribute"
         @update-edge-type="handleUpdateEdgeType"
+        @add-member="handleAddMember"
+        @update-member="handleUpdateMember"
+        @delete-member="handleDeleteMember"
         @update:diagram-direction="diagramDirection = $event"
         @update:seq-auto-number="seqAutoNumber = $event"
         @add-activation="handleAddActivation"

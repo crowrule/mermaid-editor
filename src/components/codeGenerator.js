@@ -242,7 +242,22 @@ function generateClass(nodes, edges, direction) {
   const lines = ['classDiagram']
   if (dir !== 'TD') lines.push(`  direction ${mermaidDir}`)
   nodes.forEach(node => {
-    lines.push(`  class ${node.label}`)
+    const members = node.members || []
+    if (members.length > 0) {
+      lines.push(`  class ${node.label} {`)
+      members.forEach(m => {
+        // Method: visibility name(params) returnType  e.g. +eat() void
+        // Field:  visibility type name                e.g. +String name
+        if (m.name.includes('(')) {
+          lines.push(`    ${m.visibility}${m.name} ${m.type}`)
+        } else {
+          lines.push(`    ${m.visibility}${m.type} ${m.name}`)
+        }
+      })
+      lines.push(`  }`)
+    } else {
+      lines.push(`  class ${node.label}`)
+    }
   })
   edges.forEach(edge => {
     const fromNode = nodes.find(n => n.id === edge.from)

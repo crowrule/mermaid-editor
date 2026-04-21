@@ -20,6 +20,7 @@ const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
   'delete-node', 'delete-edge', 'update-node-label', 'update-edge-label',
   'add-attribute', 'delete-attribute', 'update-edge-type',
+  'add-member', 'update-member', 'delete-member',
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
@@ -286,6 +287,25 @@ const newAttrName = ref('')
 const newAttrTypeInputRef = ref(null)
 const newAttrNameInputRef = ref(null)
 
+// inline add member (class diagram)
+const addingMemberNodeId  = ref(null)
+const newMemberIsMethod   = ref(false)
+const newMemberVis        = ref('+')
+const newMemberType       = ref('String')
+const newMemberName       = ref('')
+const newMemberTypeInputRef = ref(null)
+const newMemberNameInputRef = ref(null)
+
+// inline edit member (class diagram)
+const editingMemberNodeId    = ref(null)
+const editingMemberIndex     = ref(null)
+const editMemberIsMethod     = ref(false)
+const editMemberVis          = ref('+')
+const editMemberType         = ref('')
+const editMemberName         = ref('')
+const editMemberTypeInputRef = ref(null)
+const editMemberNameInputRef = ref(null)
+
 // inline edit — edge
 const editingEdgeId = ref(null)
 const editEdgeLabel = ref('')
@@ -351,12 +371,15 @@ watch(() => props.diagramType, () => {
   editingNodeId.value     = null
   editingEdgeId.value     = null
   editingSgId.value       = null
-  addingAttrNodeId.value  = null
-  connectSource.value     = null
-  ctxEdgeId.value         = null
-  regionMenu.value        = null
-  sgDragStart             = null
-  sgDragPreview.value     = null
+  addingAttrNodeId.value   = null
+  addingMemberNodeId.value  = null
+  editingMemberNodeId.value = null
+  editingMemberIndex.value  = null
+  connectSource.value       = null
+  ctxEdgeId.value          = null
+  regionMenu.value         = null
+  sgDragStart              = null
+  sgDragPreview.value      = null
 })
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -372,6 +395,11 @@ function entityHeight(node) {
 // Geometric center of the full entity box (shifted down by half the attribute area)
 function erEntityCenter(node) {
   return { x: node.x, y: node.y + (node.attributes?.length || 0) * 10 }
+}
+
+// ── class member helpers ──────────────────────────────────────────────────────
+function classNodeHeight(node) {
+  return NODE_H + (node.members?.length || 0) * 20
 }
 
 // ── empty state hints ─────────────────────────────────────────────────────────
@@ -613,6 +641,7 @@ function onBgMousedown(e) {
   selectedSgId.value = null
   connectSource.value = null
   addingAttrNodeId.value = null
+  addingMemberNodeId.value = null
   ctxEdgeId.value = null
   slotCtxVisible.value = false
   regionMenu.value = null
@@ -663,6 +692,8 @@ function onNodeDown(e, node) {
   selectedSgId.value = null
   if (addingAttrNodeId.value !== null && addingAttrNodeId.value !== node.id)
     addingAttrNodeId.value = null
+  if (addingMemberNodeId.value !== null && addingMemberNodeId.value !== node.id)
+    addingMemberNodeId.value = null
 
   if (props.mode === 'delete') {
     emit('delete-node', node.id)
@@ -710,6 +741,7 @@ function onEdgeClick(e, edge) {
   e.stopPropagation()
   ctxEdgeId.value = null
   addingAttrNodeId.value = null
+  addingMemberNodeId.value = null
   selectedSgId.value = null
   if (props.mode === 'delete') {
     emit('delete-edge', edge.id)
@@ -789,6 +821,72 @@ function commitAddAttr() {
 function onAttrRowMousedown(e, nodeId, index) {
   // Attribute row always stops propagation to prevent entity select/delete
   if (props.mode === 'delete') emit('delete-attribute', nodeId, index)
+}
+
+function startAddMember(node, e) {
+  e?.stopPropagation()
+  addingMemberNodeId.value = node.id
+  newMemberIsMethod.value  = false
+  newMemberVis.value  = '+'
+  newMemberType.value = 'String'
+  newMemberName.value = 'name'
+  nextTick(() => newMemberTypeInputRef.value?.focus())
+}
+
+function toggleMemberKind() {
+  newMemberIsMethod.value = !newMemberIsMethod.value
+  newMemberType.value = newMemberIsMethod.value ? 'void' : 'String'
+  newMemberName.value = newMemberIsMethod.value ? 'method()' : 'name'
+  nextTick(() => newMemberTypeInputRef.value?.focus())
+}
+
+function commitAddMember() {
+  if (addingMemberNodeId.value !== null) {
+    let name = newMemberName.value.trim()
+    const type = newMemberType.value.trim() || (newMemberIsMethod.value ? 'void' : 'String')
+    const vis  = newMemberVis.value
+    if (name) {
+      // Auto-add () for methods if not already present
+      if (newMemberIsMethod.value && !name.includes('(')) name += '()'
+      emit('add-member', addingMemberNodeId.value, vis, type, name)
+    }
+    addingMemberNodeId.value = null
+  }
+}
+
+function onMemberRowMousedown(e, nodeId, index) {
+  if (props.mode === 'delete') emit('delete-member', nodeId, index)
+}
+
+function startEditMember(node, index, member, e) {
+  e?.stopPropagation()
+  if (props.mode === 'delete' || props.mode === 'connect') return
+  editingMemberNodeId.value = node.id
+  editingMemberIndex.value  = index
+  editMemberIsMethod.value  = member.name.includes('(')
+  editMemberVis.value       = member.visibility
+  editMemberType.value      = member.type
+  editMemberName.value      = member.name
+  nextTick(() => editMemberTypeInputRef.value?.focus())
+}
+
+function commitEditMember() {
+  if (editingMemberNodeId.value !== null && editingMemberIndex.value !== null) {
+    let name = editMemberName.value.trim()
+    const type = editMemberType.value.trim() || (editMemberIsMethod.value ? 'void' : 'String')
+    const vis  = editMemberVis.value
+    if (name) {
+      if (editMemberIsMethod.value && !name.includes('(')) name += '()'
+      emit('update-member', editingMemberNodeId.value, editingMemberIndex.value, vis, type, name)
+    }
+  }
+  editingMemberNodeId.value = null
+  editingMemberIndex.value  = null
+}
+
+function toggleEditMemberKind() {
+  editMemberIsMethod.value = !editMemberIsMethod.value
+  nextTick(() => editMemberTypeInputRef.value?.focus())
 }
 
 function commitEdgeEdit() {
@@ -1100,8 +1198,9 @@ function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (editingNodeId.value !== null)   return
     if (editingEdgeId.value !== null)   return
-    if (addingAttrNodeId.value !== null) return
-    if (editingSgId.value !== null)     return
+    if (addingAttrNodeId.value !== null)  return
+    if (addingMemberNodeId.value !== null) return
+    if (editingSgId.value !== null)       return
     if (selectedSgId.value !== null) {
       emit('delete-subgraph', selectedSgId.value)
       selectedSgId.value = null
@@ -1127,10 +1226,13 @@ function onKeyDown(e) {
     draggingDivRegId.value    = null
     divDragPreviewSlot.value  = null
     dividerCtxMenu.value      = null
-    addingAttrNodeId.value    = null
-    ctxEdgeId.value           = null
-    regionMenu.value          = null
-    resizingRegionId.value    = null
+    addingAttrNodeId.value     = null
+    addingMemberNodeId.value   = null
+    editingMemberNodeId.value  = null
+    editingMemberIndex.value   = null
+    ctxEdgeId.value            = null
+    regionMenu.value           = null
+    resizingRegionId.value     = null
     resizePreviewEndSlot.value = null
   }
 }
@@ -1631,8 +1733,8 @@ function onKeyDown(e) {
       @mousedown.stop="onNodeDown($event, node)"
       @dblclick.stop="startEdit(node)"
     >
-      <!-- process / participant / class → plain rect -->
-      <template v-if="['process','participant','class'].includes(node.type)">
+      <!-- process / participant → plain rect -->
+      <template v-if="['process','participant'].includes(node.type)">
         <rect
           :x="effectiveX(node) - NODE_W / 2"
           :y="effectiveY(node) - NODE_H / 2"
@@ -1641,6 +1743,100 @@ function onKeyDown(e) {
           :stroke="strokeColor(node)"
           stroke-width="2"
         />
+      </template>
+
+      <!-- class → expandable rect with member rows -->
+      <template v-if="node.type === 'class'">
+        <rect
+          :x="effectiveX(node) - NODE_W / 2"
+          :y="effectiveY(node) - NODE_H / 2"
+          :width="NODE_W" :height="classNodeHeight(node)"
+          :fill="nodeColor('class').fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+        <!-- header/body divider -->
+        <line
+          v-if="node.members?.length"
+          :x1="effectiveX(node) - NODE_W / 2" :y1="effectiveY(node) + NODE_H / 2"
+          :x2="effectiveX(node) + NODE_W / 2" :y2="effectiveY(node) + NODE_H / 2"
+          :stroke="nodeColor('class').stroke" stroke-width="1" opacity="0.5"
+        />
+        <!-- member rows -->
+        <g
+          v-for="(member, i) in (node.members || [])"
+          :key="'member-' + i"
+          @mousedown.stop="onMemberRowMousedown($event, node.id, i)"
+          @dblclick.stop="startEditMember(node, i, member, $event)"
+          style="cursor:default"
+        >
+          <rect
+            :x="effectiveX(node) - NODE_W / 2"
+            :y="effectiveY(node) + NODE_H / 2 + i * 20"
+            :width="NODE_W" height="20"
+            :fill="mode === 'delete' ? 'rgba(248,113,113,0.12)' : 'transparent'"
+            style="cursor:pointer"
+          />
+          <!-- hide row text while editing this member -->
+          <template v-if="editingMemberNodeId === node.id && editingMemberIndex === i" />
+          <template v-else>
+          <!-- visibility -->
+          <text
+            :x="effectiveX(node) - NODE_W / 2 + 6"
+            :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+            fill="#818cf8" font-size="10" text-anchor="start" pointer-events="none"
+          >{{ member.visibility }}</text>
+          <!-- field: vis Type name  /  method: vis name() ReturnType -->
+          <template v-if="member.name.includes('(')">
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#e2e8f0" font-size="10" text-anchor="start" pointer-events="none"
+            >{{ member.name }}</text>
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18 + member.name.length * 6.5"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#a5b4fc" font-size="10" text-anchor="start" pointer-events="none"
+            > {{ member.type }}</text>
+          </template>
+          <template v-else>
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#a5b4fc" font-size="10" text-anchor="start" pointer-events="none"
+            >{{ member.type }}</text>
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18 + member.type.length * 6.5"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#e2e8f0" font-size="10" text-anchor="start" pointer-events="none"
+            > {{ member.name }}</text>
+          </template>
+          <text
+            v-if="mode === 'delete'"
+            :x="effectiveX(node) + NODE_W / 2 - 8"
+            :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+            fill="#f87171" font-size="11" text-anchor="middle" pointer-events="none"
+          >×</text>
+          </template><!-- /editing-hide -->
+        </g>
+        <!-- "+ member" button (select mode, selected node, not currently adding) -->
+        <g
+          v-if="mode === 'select' && selectedId === node.id && addingMemberNodeId !== node.id"
+          @mousedown.stop="startAddMember(node, $event)"
+          style="cursor:pointer"
+        >
+          <rect
+            :x="effectiveX(node) - 24"
+            :y="effectiveY(node) - NODE_H / 2 + classNodeHeight(node) + 3"
+            width="48" height="14" rx="2"
+            fill="#3730a3" opacity="0.85"
+          />
+          <text
+            :x="effectiveX(node)"
+            :y="effectiveY(node) - NODE_H / 2 + classNodeHeight(node) + 13"
+            fill="#c7d2fe" font-size="9" text-anchor="middle" pointer-events="none"
+          >+ member</text>
+        </g>
       </template>
 
       <!-- entity → expandable rect with attribute rows -->
@@ -1915,6 +2111,100 @@ function onKeyDown(e) {
         <button
           @mousedown.prevent.stop="commitAddAttr"
           style="background:#0f766e;color:#ccfbf1;border:none;font-size:11px;padding:2px 7px;cursor:pointer;border-radius:2px;"
+        >✓</button>
+      </div>
+    </foreignObject>
+
+    <!-- ── inline member add form (class diagram) ── -->
+    <foreignObject
+      v-if="addingMemberNodeId !== null"
+      :x="(() => { const n = nodes.find(n => n.id === addingMemberNodeId); return n ? effectiveX(n) - NODE_W / 2 : 0 })()"
+      :y="(() => { const n = nodes.find(n => n.id === addingMemberNodeId); return n ? effectiveY(n) - NODE_H / 2 + classNodeHeight(n) + 20 : 0 })()"
+      width="266" height="28"
+    >
+      <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;gap:3px;height:100%">
+        <!-- visibility -->
+        <select
+          v-model="newMemberVis"
+          style="width:36px;background:#0f172a;color:#818cf8;border:1px solid #4f46e5;font-size:11px;padding:2px 2px;outline:none;box-sizing:border-box;"
+        >
+          <option value="+">+</option>
+          <option value="-">-</option>
+          <option value="#">#</option>
+          <option value="~">~</option>
+        </select>
+        <!-- field / method toggle -->
+        <button
+          @mousedown.prevent.stop="toggleMemberKind"
+          :style="`background:${newMemberIsMethod ? '#1e3a5f' : '#14532d'};color:${newMemberIsMethod ? '#93c5fd' : '#86efac'};border:1px solid ${newMemberIsMethod ? '#3b82f6' : '#22c55e'};font-size:10px;padding:2px 5px;cursor:pointer;border-radius:2px;white-space:nowrap;`"
+        >{{ newMemberIsMethod ? 'M' : 'F' }}</button>
+        <!-- type / return-type -->
+        <input
+          ref="newMemberTypeInputRef"
+          v-model="newMemberType"
+          :placeholder="newMemberIsMethod ? 'ret type' : 'type'"
+          @keydown.enter.stop="commitAddMember"
+          @keydown.tab.prevent="newMemberNameInputRef?.focus()"
+          @keydown.escape.stop="addingMemberNodeId = null"
+          style="width:60px;background:#0f172a;color:#a5b4fc;border:1px solid #4f46e5;font-size:11px;padding:2px 4px;outline:none;box-sizing:border-box;"
+        />
+        <!-- name -->
+        <input
+          ref="newMemberNameInputRef"
+          v-model="newMemberName"
+          :placeholder="newMemberIsMethod ? 'name(params)' : 'name'"
+          @keydown.enter.stop="commitAddMember"
+          @keydown.escape.stop="addingMemberNodeId = null"
+          style="width:96px;background:#0f172a;color:#e2e8f0;border:1px solid #4f46e5;font-size:11px;padding:2px 4px;outline:none;box-sizing:border-box;"
+        />
+        <button
+          @mousedown.prevent.stop="commitAddMember"
+          style="background:#3730a3;color:#c7d2fe;border:none;font-size:11px;padding:2px 7px;cursor:pointer;border-radius:2px;"
+        >✓</button>
+      </div>
+    </foreignObject>
+
+    <!-- ── inline member edit form (class diagram) ── -->
+    <foreignObject
+      v-if="editingMemberNodeId !== null"
+      :x="(() => { const n = nodes.find(n => n.id === editingMemberNodeId); return n ? effectiveX(n) - NODE_W / 2 : 0 })()"
+      :y="(() => { const n = nodes.find(n => n.id === editingMemberNodeId); return n ? effectiveY(n) + NODE_H / 2 + editingMemberIndex * 20 : 0 })()"
+      width="266" height="20"
+    >
+      <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;gap:3px;height:100%;align-items:center">
+        <select
+          v-model="editMemberVis"
+          style="width:36px;height:18px;background:#0f172a;color:#818cf8;border:1px solid #f59e0b;font-size:11px;padding:0 2px;outline:none;box-sizing:border-box;"
+        >
+          <option value="+">+</option>
+          <option value="-">-</option>
+          <option value="#">#</option>
+          <option value="~">~</option>
+        </select>
+        <button
+          @mousedown.prevent.stop="toggleEditMemberKind"
+          :style="`height:18px;background:${editMemberIsMethod ? '#1e3a5f' : '#14532d'};color:${editMemberIsMethod ? '#93c5fd' : '#86efac'};border:1px solid ${editMemberIsMethod ? '#3b82f6' : '#22c55e'};font-size:10px;padding:0 5px;cursor:pointer;border-radius:2px;`"
+        >{{ editMemberIsMethod ? 'M' : 'F' }}</button>
+        <input
+          ref="editMemberTypeInputRef"
+          v-model="editMemberType"
+          :placeholder="editMemberIsMethod ? 'ret type' : 'type'"
+          @keydown.enter.stop="commitEditMember"
+          @keydown.tab.prevent="editMemberNameInputRef?.focus()"
+          @keydown.escape.stop="editingMemberNodeId = null; editingMemberIndex = null"
+          style="width:60px;height:18px;background:#0f172a;color:#a5b4fc;border:1px solid #f59e0b;font-size:11px;padding:0 4px;outline:none;box-sizing:border-box;"
+        />
+        <input
+          ref="editMemberNameInputRef"
+          v-model="editMemberName"
+          :placeholder="editMemberIsMethod ? 'name(params)' : 'name'"
+          @keydown.enter.stop="commitEditMember"
+          @keydown.escape.stop="editingMemberNodeId = null; editingMemberIndex = null"
+          style="width:96px;height:18px;background:#0f172a;color:#e2e8f0;border:1px solid #f59e0b;font-size:11px;padding:0 4px;outline:none;box-sizing:border-box;"
+        />
+        <button
+          @mousedown.prevent.stop="commitEditMember"
+          style="height:18px;background:#78350f;color:#fde68a;border:none;font-size:11px;padding:0 7px;cursor:pointer;border-radius:2px;"
         >✓</button>
       </div>
     </foreignObject>
