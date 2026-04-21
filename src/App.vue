@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { generateCode } from './components/codeGenerator.js'
+import { detectDiagramType, parseDiagram } from './components/diagramParser.js'
 import VisualEditor from './components/VisualEditor.vue'
 import DiagramPreview from './components/DiagramPreview.vue'
 import DiagramEditor from './components/DiagramEditor.vue'
@@ -13,9 +14,16 @@ const nodes = ref([])
 const edges = ref([])
 const activations = ref([])
 const regions    = ref([])
+const subgraphs  = ref([])
 const diagramCode = ref('')
 const rightTab = ref('preview')
 const previewRef = ref(null)
+const seqFlowCountInit = ref(null)   // set on file load to sync VisualEditor
+
+let loadingFile = false              // suppresses watchers during file load
+
+// ── unsupported diagram type popup ────────────────────────────────────────────
+const showUnsupportedPopup = ref(false)
 
 // ── clear confirmation ────────────────────────────────────────────────────────
 const showClearConfirm = ref(false)
@@ -30,10 +38,12 @@ function confirmClear() {
   edges.value       = []
   activations.value = []
   regions.value     = []
+  subgraphs.value   = []
   nodeIdCounter       = 1
   edgeIdCounter       = 1
   activationIdCounter = 1
   regionIdCounter     = 1
+  subgraphIdCounter   = 1
   diagramDirection.value = 'TD'
   seqAutoNumber.value    = false
 }
@@ -69,6 +79,7 @@ let nodeIdCounter = 1
 let edgeIdCounter = 1
 let activationIdCounter = 1
 let regionIdCounter    = 1
+let subgraphIdCounter  = 1
 
 // ── resizable divider ──────────────────────────────────────────────────────────
 const leftPct = ref(60)
@@ -106,25 +117,30 @@ onUnmounted(() => {
 })
 
 // Auto-generate mermaid code whenever visual state changes
-watch([diagramType, diagramDirection, seqAutoNumber, nodes, edges, activations, regions], () => {
+watch([diagramType, diagramDirection, seqAutoNumber, nodes, edges, activations, regions, subgraphs], () => {
+  if (loadingFile) return
   diagramCode.value = generateCode(diagramType.value, nodes.value, edges.value, {
     direction:   diagramDirection.value,
     autonumber:  seqAutoNumber.value,
     activations: activations.value,
     regions:     regions.value,
+    subgraphs:   subgraphs.value,
   })
 }, { deep: true })
 
 // Clear canvas when diagram type changes
 watch(diagramType, () => {
+  if (loadingFile) return
   nodes.value       = []
   edges.value       = []
   activations.value = []
   regions.value     = []
+  subgraphs.value   = []
   nodeIdCounter       = 1
   edgeIdCounter       = 1
   activationIdCounter = 1
   regionIdCounter     = 1
+  subgraphIdCounter   = 1
   diagramDirection.value = 'TD'
   seqAutoNumber.value    = false
 })
@@ -248,6 +264,17 @@ function handleDeleteRegion(id) {
   regions.value = regions.value.filter(r => r.id !== id)
 }
 
+function handleAddSubgraph(x, y, width, height) {
+  subgraphs.value.push({ id: subgraphIdCounter++, label: `Group ${subgraphIdCounter - 1}`, x, y, width, height })
+}
+function handleUpdateSubgraph(id, updates) {
+  const sg = subgraphs.value.find(s => s.id === id)
+  if (sg) Object.assign(sg, updates)
+}
+function handleDeleteSubgraph(id) {
+  subgraphs.value = subgraphs.value.filter(s => s.id !== id)
+}
+
 function handleAddActivation(nodeId, startSlot, endSlot) {
   activations.value.push({ id: activationIdCounter++, nodeId, startSlot, endSlot })
 }
@@ -284,31 +311,77 @@ async function saveCode() {
   }
 }
 
-function openCode() {
+async function openCode() {
+  let text = null
+
   if (window.showOpenFilePicker) {
-    window.showOpenFilePicker({
-      types: [{ description: 'Mermaid Diagram', accept: { 'text/plain': ['.mermaid', '.md', '.txt'] } }],
-      multiple: false,
-    }).then(async ([handle]) => {
-      const file = await handle.getFile()
-      diagramCode.value = await file.text()
-    }).catch(e => { if (e.name !== 'AbortError') console.error(e) })
-  } else {
-    // Fallback: hidden file input
-    const input = document.createElement('input')
-    input.type = 'file'
-    input.accept = '.mermaid,.md,.txt'
-    input.onchange = async () => {
-      if (!input.files?.[0]) return
-      diagramCode.value = await input.files[0].text()
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: 'Mermaid Diagram', accept: { 'text/plain': ['.mermaid', '.md', '.txt'] } }],
+        multiple: false,
+      })
+      text = await (await handle.getFile()).text()
+    } catch (e) {
+      if (e.name !== 'AbortError') console.error(e)
+      return
     }
-    input.click()
+  } else {
+    text = await new Promise(resolve => {
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = '.mermaid,.md,.txt'
+      input.onchange = async () => resolve(input.files?.[0] ? await input.files[0].text() : null)
+      input.oncancel  = () => resolve(null)
+      input.click()
+    })
+    if (!text) return
   }
+
+  // Detect and validate diagram type
+  const detectedType = detectDiagramType(text)
+  if (!detectedType) {
+    showUnsupportedPopup.value = true
+    return
+  }
+
+  const parsed = parseDiagram(text)
+  if (!parsed) { showUnsupportedPopup.value = true; return }
+
+  // Load into state — suppress watchers during the batch update
+  loadingFile = true
+
+  diagramType.value       = parsed.type
+  diagramDirection.value  = parsed.direction  || 'TD'
+  seqAutoNumber.value     = parsed.seqAutoNumber || false
+  nodes.value             = parsed.nodes
+  edges.value             = parsed.edges
+  activations.value       = parsed.activations || []
+  regions.value           = parsed.regions     || []
+
+  // Reset ID counters above highest parsed ID
+  const maxId = (arr) => arr.length ? Math.max(...arr.map(x => x.id)) : 0
+  nodeIdCounter       = maxId(parsed.nodes)       + 1
+  edgeIdCounter       = maxId(parsed.edges)       + 1
+  activationIdCounter = maxId(parsed.activations || []) + 1
+  regionIdCounter     = maxId(parsed.regions     || []) + 1
+
+  // Propagate seqFlowCount to VisualEditor
+  if (parsed.seqFlowCount) seqFlowCountInit.value = parsed.seqFlowCount
+
+  // Set code with commented-out unsupported lines
+  diagramCode.value = parsed.modifiedCode
+
+  // Wait for watchers to flush (they will be suppressed by loadingFile)
+  await nextTick()
+  loadingFile = false
 }
 
 // ── i18n ──────────────────────────────────────────────────────────────────────
 const TRANSLATIONS = {
   ko: {
+    unsupportedTitle:  '지원하지 않는 다이어그램',
+    unsupportedBody:   'Flowchart, Sequence Diagram, ER Diagram\n파일만 불러올 수 있습니다.',
+    unsupportedClose:  '닫기',
     clearTitle:        '캔버스 초기화',
     clearBody:         '현재 캔버스에 그려진 내용이 모두 삭제됩니다.\n계속 하시겠습니까?',
     clearCancel:       '취소',
@@ -319,6 +392,9 @@ const TRANSLATIONS = {
     typeChangeConfirm: '확인',
   },
   en: {
+    unsupportedTitle:  'Unsupported Diagram Type',
+    unsupportedBody:   'Only Flowchart, Sequence, and ER Diagram\nfiles can be opened.',
+    unsupportedClose:  'Close',
     clearTitle:        'Clear Canvas',
     clearBody:         'All content on the canvas will be deleted.\nDo you want to continue?',
     clearCancel:       'Cancel',
@@ -329,6 +405,9 @@ const TRANSLATIONS = {
     typeChangeConfirm: 'Confirm',
   },
   es: {
+    unsupportedTitle:  'Tipo no compatible',
+    unsupportedBody:   'Solo se pueden abrir archivos de tipo\nFlowchart, Sequence y ER Diagram.',
+    unsupportedClose:  'Cerrar',
     clearTitle:        'Limpiar lienzo',
     clearBody:         'Todo el contenido del lienzo será eliminado.\n¿Deseas continuar?',
     clearCancel:       'Cancelar',
@@ -434,10 +513,12 @@ function onLangMenuClickOutside(e) {
         :diagram-direction="diagramDirection"
         :seq-auto-number="seqAutoNumber"
         :lang="lang"
+        :seq-flow-count-init="seqFlowCountInit"
         :nodes="nodes"
         :edges="edges"
         :activations="activations"
         :regions="regions"
+        :subgraphs="subgraphs"
         @add-node="handleAddNode"
         @move-node="handleMoveNode"
         @add-edge="handleAddEdge"
@@ -456,6 +537,9 @@ function onLangMenuClickOutside(e) {
         @add-region="handleAddRegion"
         @update-region="handleUpdateRegion"
         @delete-region="handleDeleteRegion"
+        @add-subgraph="handleAddSubgraph"
+        @update-subgraph="handleUpdateSubgraph"
+        @delete-subgraph="handleDeleteSubgraph"
         @clear="requestClear"
       />
 
@@ -522,6 +606,29 @@ function onLangMenuClickOutside(e) {
         />
       </div>
     </main>
+
+    <!-- ── unsupported diagram type modal ── -->
+    <Transition name="fade">
+      <div
+        v-if="showUnsupportedPopup"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+        @click.self="showUnsupportedPopup = false"
+      >
+        <div class="bg-gray-800 border border-gray-600 rounded-lg shadow-xl w-80 p-6 flex flex-col gap-4">
+          <div class="flex items-center gap-2">
+            <span class="text-yellow-400 text-lg">⚠</span>
+            <h2 class="text-base font-semibold text-gray-100">{{ t.unsupportedTitle }}</h2>
+          </div>
+          <p class="text-sm text-gray-400 leading-relaxed whitespace-pre-line">{{ t.unsupportedBody }}</p>
+          <div class="flex justify-end">
+            <button
+              @click="showUnsupportedPopup = false"
+              class="px-4 py-1.5 text-sm rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors"
+            >{{ t.unsupportedClose }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
 
     <!-- ── clear confirmation modal ── -->
     <Transition name="fade">

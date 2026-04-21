@@ -6,6 +6,7 @@ const props = defineProps({
   edges:       { type: Array, required: true },
   activations: { type: Array, default: () => [] },
   regions:     { type: Array, default: () => [] },
+  subgraphs:   { type: Array, default: () => [] },
   diagramType:      { type: String, required: true },
   mode:             { type: String, default: 'select' },
   selectedNodeType: { type: String, default: 'process' },
@@ -22,6 +23,7 @@ const emit = defineEmits([
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
+  'add-subgraph', 'update-subgraph', 'delete-subgraph',
 ])
 
 // Cardinality options for each side of an ER relation
@@ -62,8 +64,52 @@ const REGION_TYPES = [
   { type: 'opt',      label: 'opt',      fill: '#14532d', stroke: '#4ade80' },
   { type: 'loop',     label: 'loop',     fill: '#164e63', stroke: '#22d3ee' },
 ]
+// Brighter inner-region colors (used when depth > 0)
+const REGION_INNER_COLORS = {
+  rect:     { fill: '#0f766e', stroke: '#5eead4' },
+  alt:      { fill: '#4c1d95', stroke: '#d8b4fe' },
+  par:      { fill: '#1d4ed8', stroke: '#93c5fd' },
+  critical: { fill: '#b91c1c', stroke: '#fca5a5' },
+  break:    { fill: '#c2410c', stroke: '#fdba74' },
+  opt:      { fill: '#15803d', stroke: '#86efac' },
+  loop:     { fill: '#0e7490', stroke: '#67e8f9' },
+}
+const REGION_INDENT = 14   // px indented per nesting depth (each side)
+
 function regionTypeInfo(type) {
   return REGION_TYPES.find(r => r.type === type) ?? REGION_TYPES[0]
+}
+
+// depth: how many other regions fully contain this one
+const regionDepths = computed(() => {
+  const map = new Map()
+  for (const r of props.regions) {
+    let depth = 0
+    for (const other of props.regions) {
+      if (other.id !== r.id &&
+          other.startSlot <= r.startSlot &&
+          r.endSlot <= other.endSlot) depth++
+    }
+    map.set(r.id, depth)
+  }
+  return map
+})
+
+// returns fill/stroke for a region based on its nesting depth
+function regionStyle(region) {
+  const depth = regionDepths.value.get(region.id) ?? 0
+  if (depth === 0) return regionTypeInfo(region.type)
+  const inner = REGION_INNER_COLORS[region.type]
+  return inner ?? regionTypeInfo(region.type)
+}
+
+// returns layout {left, right, width} for a region based on nesting depth
+function rLayout(region) {
+  const depth = regionDepths.value.get(region.id) ?? 0
+  const dx    = depth * REGION_INDENT
+  const left  = 10 + dx
+  const right = seqBodyWidth.value - 10 - dx
+  return { left, right, width: right - left }
 }
 
 // ── constants ────────────────────────────────────────────────────────────────
@@ -276,6 +322,14 @@ let   dividerDragStarted     = false
 const dividerCtxMenu = ref(null)  // { x, y, divId, regionId }
 const regionCtxMenu  = ref(null)  // { x, y, regionId }
 
+// ── subgraph (flowchart only) ─────────────────────────────────────────────────
+const selectedSgId    = ref(null)
+const editingSgId     = ref(null)
+const editSgLabel     = ref('')
+const editSgLabelRef  = ref(null)
+const sgDragPreview   = ref(null)  // { x, y, width, height } during draw
+let   sgDragStart     = null       // { x, y } anchor point
+
 const currentMenuRegion = computed(() =>
   regionMenu.value?.targetRegionId != null
     ? props.regions.find(r => r.id === regionMenu.value.targetRegionId) ?? null
@@ -305,6 +359,13 @@ function erEntityCenter(node) {
 }
 
 // ── empty state hints ─────────────────────────────────────────────────────────
+const REGION_MENU_I18N = {
+  en: { changeType: 'Change Type', selectType: 'Select Region Type', delete: 'Delete' },
+  es: { changeType: 'Cambiar tipo', selectType: 'Seleccionar tipo',  delete: 'Eliminar' },
+  ko: { changeType: '타입 변경',    selectType: '구역 타입 선택',     delete: '삭제' },
+}
+const regionMenuI18n = computed(() => REGION_MENU_I18N[props.lang] ?? REGION_MENU_I18N.en)
+
 const EMPTY_HINTS = {
   en: {
     seq:    'In Add mode, click to add Participant / Actor',
@@ -415,6 +476,24 @@ function entityBoundaryPoint(cx, cy, ux, uy, halfW = NODE_W / 2, halfH = NODE_H 
   }
 }
 
+// Boundary point for flowchart node shapes in direction (ux, uy) from node center
+function fcNodeBoundaryPoint(node, ux, uy) {
+  const hw = NODE_W / 2, hh = NODE_H / 2
+  if (node.type === 'reference') {
+    // circle: radius = NODE_H / 2
+    return { x: node.x + hh * ux, y: node.y + hh * uy }
+  }
+  if (node.type === 'decision') {
+    // diamond: |x/hw| + |y/hh| = 1
+    const denom = Math.abs(ux) / hw + Math.abs(uy) / hh
+    if (denom < 0.0001) return { x: node.x, y: node.y }
+    const t = 1 / denom
+    return { x: node.x + t * ux, y: node.y + t * uy }
+  }
+  // rectangle family: process, terminal, subprocess, io, database, multiprocess, class
+  return entityBoundaryPoint(node.x, node.y, ux, uy)
+}
+
 function edgePath(edge) {
   const fromNode = props.nodes.find(n => n.id === edge.from)
   const toNode   = props.nodes.find(n => n.id === edge.to)
@@ -440,7 +519,14 @@ function edgePath(edge) {
     const tp = entityBoundaryPoint(tc.x, tc.y, -ux, -uy, NODE_W / 2, entityHeight(toNode) / 2)
     return `M${fp.x},${fp.y} L${tp.x},${tp.y}`
   }
-  return `M${fromNode.x},${fromNode.y} L${toNode.x},${toNode.y}`
+  // Flowchart: clip path at each node's boundary so arrowhead is visible
+  const dx = toNode.x - fromNode.x
+  const dy = toNode.y - fromNode.y
+  const len = Math.sqrt(dx * dx + dy * dy) || 1
+  const ux = dx / len, uy = dy / len
+  const fp = fcNodeBoundaryPoint(fromNode,  ux,  uy)
+  const tp = fcNodeBoundaryPoint(toNode,   -ux, -uy)
+  return `M${fp.x},${fp.y} L${tp.x},${tp.y}`
 }
 
 function edgeMidpoint(edge) {
@@ -496,7 +582,7 @@ function edgeMarkerEnd(edge) {
   if (props.diagramType !== 'er') {
     if (edge.edgeType === 'open') return ''
     if (edge.edgeType === 'cross') return 'url(#arrowCross)'
-    return 'url(#arrowHead)'
+    return selectedEdgeId.value === edge.id ? 'url(#arrowHeadSel)' : 'url(#arrowHead)'
   }
   const { right } = parseERSides(edge.edgeType)
   return ER_END_MARKER[right] ?? 'url(#er-e-zero-more)'
@@ -508,6 +594,7 @@ function edgeMarkerEnd(edge) {
 function onBgMousedown(e) {
   selectedId.value = null
   selectedEdgeId.value = null
+  selectedSgId.value = null
   connectSource.value = null
   addingAttrNodeId.value = null
   ctxEdgeId.value = null
@@ -521,6 +608,13 @@ function onBgMousedown(e) {
     regionDragStartSlot = Math.round((y - SEQ_BODY_PADDING) / props.seqFlowSpacing)
     regionDragStartY    = e.clientY
     regionDragStarted   = false
+    return
+  }
+
+  // Flowchart select: start subgraph drag-to-draw
+  if (!isSequence.value && props.mode === 'select') {
+    const pt = svgPoint(e)
+    sgDragStart = { x: pt.x, y: pt.y }
     return
   }
 
@@ -550,6 +644,7 @@ function onHeaderMousedown(e) {
 function onNodeDown(e, node) {
   e.stopPropagation()
   selectedEdgeId.value = null
+  selectedSgId.value = null
   if (addingAttrNodeId.value !== null && addingAttrNodeId.value !== node.id)
     addingAttrNodeId.value = null
 
@@ -599,6 +694,7 @@ function onEdgeClick(e, edge) {
   e.stopPropagation()
   ctxEdgeId.value = null
   addingAttrNodeId.value = null
+  selectedSgId.value = null
   if (props.mode === 'delete') {
     emit('delete-edge', edge.id)
     return
@@ -608,12 +704,30 @@ function onEdgeClick(e, edge) {
 }
 
 function onMouseMove(e) {
+  // Subgraph drag-to-draw preview
+  if (sgDragStart) {
+    const pt = svgPoint(e)
+    const x = Math.min(sgDragStart.x, pt.x)
+    const y = Math.min(sgDragStart.y, pt.y)
+    sgDragPreview.value = { x, y, width: Math.abs(pt.x - sgDragStart.x), height: Math.abs(pt.y - sgDragStart.y) }
+    return
+  }
   if (!dragging) return
   const pt = svgPoint(e)
   emit('move-node', dragging.id, pt.x - dragOffX, pt.y - dragOffY)
 }
 
 function onMouseUp() {
+  // Finalize subgraph creation
+  if (sgDragStart) {
+    const prev = sgDragPreview.value
+    if (prev && prev.width > 40 && prev.height > 40) {
+      emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
+    }
+    sgDragStart = null
+    sgDragPreview.value = null
+    return
+  }
   dragging = null
 }
 
@@ -737,6 +851,12 @@ function onSelfLoop() {
 }
 
 // ── region functions ──────────────────────────────────────────────────────────
+function onRegionMenuDelete() {
+  if (!regionMenu.value?.targetRegionId) return
+  emit('delete-region', regionMenu.value.targetRegionId)
+  regionMenu.value = null
+}
+
 function onRegionMenuSelect(type) {
   if (!regionMenu.value) return
   if (regionMenu.value.targetRegionId !== null) {
@@ -931,13 +1051,45 @@ function onResizeHandleDown(region, e) {
   resizePreviewEndSlot.value = region.endSlot
 }
 
+// ── subgraph functions ────────────────────────────────────────────────────────
+function onSgMousedown(e, sg) {
+  e.stopPropagation()
+  editingSgId.value = null
+  if (props.mode === 'delete') {
+    emit('delete-subgraph', sg.id)
+    return
+  }
+  if (props.mode === 'select') {
+    selectedSgId.value = sg.id
+    selectedId.value   = null
+    selectedEdgeId.value = null
+  }
+}
+
+function startSgLabelEdit(sg) {
+  if (props.mode === 'delete') return
+  editingSgId.value = sg.id
+  editSgLabel.value = sg.label
+  nextTick(() => editSgLabelRef.value?.focus())
+}
+
+function commitSgLabel() {
+  if (editingSgId.value === null) return
+  emit('update-subgraph', editingSgId.value, { label: editSgLabel.value })
+  editingSgId.value = null
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (editingNodeId.value !== null)   return
     if (editingEdgeId.value !== null)   return
     if (addingAttrNodeId.value !== null) return
-    if (selectedId.value !== null) {
+    if (editingSgId.value !== null)     return
+    if (selectedSgId.value !== null) {
+      emit('delete-subgraph', selectedSgId.value)
+      selectedSgId.value = null
+    } else if (selectedId.value !== null) {
       emit('delete-node', selectedId.value)
       selectedId.value = null
     } else if (selectedEdgeId.value !== null) {
@@ -949,6 +1101,10 @@ function onKeyDown(e) {
     connectSource.value       = null
     editingNodeId.value       = null
     editingEdgeId.value       = null
+    editingSgId.value         = null
+    selectedSgId.value        = null
+    sgDragStart               = null
+    sgDragPreview.value       = null
     editingRegionId.value     = null
     editingDividerId.value    = null
     draggingDivId.value       = null
@@ -1063,15 +1219,15 @@ function onKeyDown(e) {
           <template v-for="(sec, si) in sectionBounds(region)" :key="'rsec-' + region.id + '-' + si">
             <!-- section background rect -->
             <rect
-              :x="10"
+              :x="rLayout(region).left"
               :y="sec.topY"
-              :width="seqBodyWidth - 20"
+              :width="rLayout(region).width"
               :height="sec.height"
-              :fill="regionTypeInfo(region.type).fill"
-              fill-opacity="0.25"
-              :stroke="regionTypeInfo(region.type).stroke"
+              :fill="regionStyle(region).fill"
+              :fill-opacity="(regionDepths.get(region.id) ?? 0) > 0 ? 0.35 : 0.25"
+              :stroke="regionStyle(region).stroke"
               stroke-width="1.5"
-              stroke-dasharray="6 4"
+              :stroke-dasharray="(regionDepths.get(region.id) ?? 0) > 0 ? '4 3' : '6 4'"
               rx="4"
               style="cursor:pointer"
               @mousedown.stop="sec.isMain ? onRegionClick(region, $event) : $event.stopPropagation()"
@@ -1080,14 +1236,14 @@ function onKeyDown(e) {
             <g style="cursor:pointer"
                @mousedown.stop="sec.isMain ? onRegionTypeClick(region, $event) : onDividerBadgeMousedown(region, sec.div, $event)">
               <rect
-                :x="14"
+                :x="rLayout(region).left + 4"
                 :y="sec.topY + 4"
                 :width="sec.keyword.length * 7 + 10" height="16" rx="3"
-                :fill="regionTypeInfo(region.type).stroke"
+                :fill="regionStyle(region).stroke"
                 :fill-opacity="!sec.isMain && dividerCtxMenu?.divId === sec.div?.id ? 1 : 0.85"
               />
               <text
-                :x="14 + (sec.keyword.length * 7 + 10) / 2"
+                :x="rLayout(region).left + 4 + (sec.keyword.length * 7 + 10) / 2"
                 :y="sec.topY + 15"
                 fill="white" font-size="10" text-anchor="middle"
                 font-weight="bold" pointer-events="none"
@@ -1097,27 +1253,27 @@ function onKeyDown(e) {
             <template v-if="!sec.isMain && sec.div">
               <g style="cursor:ns-resize" @mousedown.stop="onDividerMousedown(region, sec.div, $event)">
                 <line
-                  :x1="14" :y1="sec.topY"
-                  :x2="seqBodyWidth - 14" :y2="sec.topY"
+                  :x1="rLayout(region).left + 4" :y1="sec.topY"
+                  :x2="rLayout(region).right - 4" :y2="sec.topY"
                   stroke="transparent" stroke-width="16"
                 />
                 <line
-                  :x1="14" :y1="sec.topY"
-                  :x2="seqBodyWidth - 14" :y2="sec.topY"
-                  :stroke="draggingDivId === sec.div.id ? '#f59e0b' : regionTypeInfo(region.type).stroke"
+                  :x1="rLayout(region).left + 4" :y1="sec.topY"
+                  :x2="rLayout(region).right - 4" :y2="sec.topY"
+                  :stroke="draggingDivId === sec.div.id ? '#f59e0b' : regionStyle(region).stroke"
                   :stroke-width="draggingDivId === sec.div.id ? 2 : 1"
                   stroke-dasharray="4 3"
                 />
               </g>
               <text v-if="editingDividerId !== sec.div.id"
-                :x="14 + dividerKeyword(region.type).length * 7 + 16"
+                :x="rLayout(region).left + 4 + dividerKeyword(region.type).length * 7 + 16"
                 :y="sec.topY + 15"
-                :fill="regionTypeInfo(region.type).stroke"
+                :fill="regionStyle(region).stroke"
                 font-size="10" style="cursor:text"
                 @dblclick.stop="startDividerLabelEdit(region, sec.div, $event)"
               >{{ sec.div.label || '...' }}</text>
               <foreignObject v-if="editingDividerId === sec.div.id"
-                :x="14 + dividerKeyword(region.type).length * 7 + 16"
+                :x="rLayout(region).left + 4 + dividerKeyword(region.type).length * 7 + 16"
                 :y="sec.topY + 5"
                 width="130" height="16">
                 <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
@@ -1130,26 +1286,26 @@ function onKeyDown(e) {
               </foreignObject>
             </template>
           </template>
-          <!-- right-side label: connector line + display/edit -->
+          <!-- right-side label: connector line + display/edit (anchored to top) -->
           <line
             :x1="seqBodyWidth - 10"
-            :y1="regionY(region) + regionHeight(region) / 2"
+            :y1="regionY(region) + 12"
             :x2="seqBodyWidth + 12"
-            :y2="regionY(region) + regionHeight(region) / 2"
-            :stroke="regionTypeInfo(region.type).stroke"
+            :y2="regionY(region) + 12"
+            :stroke="regionStyle(region).stroke"
             stroke-width="1" stroke-dasharray="3 2" opacity="0.7"
           />
           <text v-if="editingRegionId !== region.id"
             :x="seqBodyWidth + 18"
-            :y="regionY(region) + regionHeight(region) / 2 + 4"
-            :fill="regionTypeInfo(region.type).stroke"
+            :y="regionY(region) + 16"
+            :fill="regionStyle(region).stroke"
             font-size="12" text-anchor="start"
             style="cursor:text"
             @dblclick.stop="startRegionLabelEdit(region)"
           >{{ region.label || 'what is this?' }}</text>
           <foreignObject v-if="editingRegionId === region.id"
             :x="seqBodyWidth + 14"
-            :y="regionY(region) + regionHeight(region) / 2 - 14"
+            :y="regionY(region) + 2"
             :width="REGION_LABEL_MARGIN - 24" height="28">
             <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
               <input ref="editRegionLabelRef" v-model="editRegionLabel"
@@ -1162,25 +1318,25 @@ function onKeyDown(e) {
           <!-- bottom border — full-width drag handle -->
           <g style="cursor:ns-resize" @mousedown.stop="onResizeHandleDown(region, $event)">
             <line
-              :x1="10" :y1="regionY(region) + regionHeight(region)"
-              :x2="seqBodyWidth - 10" :y2="regionY(region) + regionHeight(region)"
+              :x1="rLayout(region).left" :y1="regionY(region) + regionHeight(region)"
+              :x2="rLayout(region).right" :y2="regionY(region) + regionHeight(region)"
               stroke="transparent" stroke-width="16"
             />
             <rect
               :x="seqBodyWidth / 2 - 24"
               :y="regionY(region) + regionHeight(region) - 4"
               width="48" height="4" rx="2"
-              :fill="regionTypeInfo(region.type).stroke"
+              :fill="regionStyle(region).stroke"
               :fill-opacity="resizingRegionId === region.id ? 1 : 0.5"
             />
           </g>
           <!-- bottom delete badge (rendered above resize handle so click takes priority) -->
           <g style="cursor:pointer" @mousedown.stop="onRegionDeleteBadgeMousedown(region, $event)">
             <rect
-              :x="14"
+              :x="rLayout(region).left + 4"
               :y="regionY(region) + regionHeight(region) - 10"
               width="36" height="14" rx="3"
-              :fill="regionTypeInfo(region.type).stroke"
+              :fill="regionStyle(region).stroke"
               :fill-opacity="regionCtxMenu?.regionId === region.id ? 1 : 0.65"
             />
             <text
@@ -1313,6 +1469,10 @@ function onKeyDown(e) {
               refX="9" refY="3.5" orient="auto">
         <polygon points="0 0, 10 3.5, 0 7" fill="#60a5fa" />
       </marker>
+      <marker id="arrowHeadSel" markerWidth="10" markerHeight="7"
+              refX="9" refY="3.5" orient="auto">
+        <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" />
+      </marker>
       <marker id="arrowCross" markerWidth="10" markerHeight="10"
               refX="5" refY="5" orient="auto">
         <line x1="0" y1="0" x2="10" y2="10" stroke="#f87171" stroke-width="2"/>
@@ -1369,6 +1529,51 @@ function onKeyDown(e) {
       x="0" y="0" width="100%" height="100%"
       fill="transparent"
       @mousedown="onBgMousedown"
+    />
+
+    <!-- ── subgraphs (rendered behind edges and nodes) ── -->
+    <g v-for="sg in subgraphs" :key="'sg-' + sg.id"
+       @mousedown.stop="onSgMousedown($event, sg)"
+       @dblclick.stop="startSgLabelEdit(sg)">
+      <rect
+        :x="sg.x" :y="sg.y" :width="sg.width" :height="sg.height"
+        fill="rgba(99,102,241,0.1)"
+        :stroke="selectedSgId === sg.id ? '#f59e0b' : '#6366f1'"
+        :stroke-width="selectedSgId === sg.id ? 2 : 1.5"
+        stroke-dasharray="6 4"
+        rx="6"
+        :style="{ cursor: mode === 'delete' ? 'not-allowed' : mode === 'select' ? 'move' : 'default' }"
+      />
+      <!-- label badge -->
+      <rect v-if="editingSgId !== sg.id"
+        :x="sg.x + 6" :y="sg.y + 4"
+        :width="(sg.label || 'subgraph').length * 7 + 14" height="18"
+        rx="3" fill="#4338ca" fill-opacity="0.85"
+      />
+      <text v-if="editingSgId !== sg.id"
+        :x="sg.x + 13" :y="sg.y + 16"
+        fill="#c7d2fe" font-size="11" font-weight="bold" pointer-events="none"
+      >{{ sg.label || 'subgraph' }}</text>
+      <!-- inline label editor -->
+      <foreignObject v-if="editingSgId === sg.id"
+        :x="sg.x + 6" :y="sg.y + 4" width="160" height="20">
+        <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
+          <input ref="editSgLabelRef" v-model="editSgLabel"
+                 @keydown.enter.stop="commitSgLabel"
+                 @keydown.escape.stop="editingSgId = null"
+                 @blur="commitSgLabel"
+                 style="width:100%;height:100%;background:#1e1b4b;color:#c7d2fe;border:1px solid #818cf8;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;" />
+        </div>
+      </foreignObject>
+    </g>
+
+    <!-- drag-to-draw preview -->
+    <rect v-if="sgDragPreview"
+      :x="sgDragPreview.x" :y="sgDragPreview.y"
+      :width="sgDragPreview.width" :height="sgDragPreview.height"
+      fill="rgba(99,102,241,0.07)"
+      stroke="#6366f1" stroke-width="1.5" stroke-dasharray="6 4"
+      rx="6" pointer-events="none"
     />
 
     <!-- ── edges ── -->
@@ -1836,7 +2041,7 @@ function onKeyDown(e) {
     @mousedown.stop
   >
     <div class="px-3 py-1.5 text-gray-400 border-b border-gray-700 select-none">
-      {{ regionMenu.targetRegionId !== null ? '타입 변경' : '구역 타입 선택' }}
+      {{ regionMenu.targetRegionId !== null ? regionMenuI18n.changeType : regionMenuI18n.selectType }}
     </div>
     <div
       v-for="rt in REGION_TYPES"
@@ -1857,6 +2062,17 @@ function onKeyDown(e) {
       >
         <span class="text-emerald-400">+</span>
         <span>add '{{ dividerKeyword(currentMenuRegion.type) }}'</span>
+      </div>
+    </template>
+    <!-- delete option (only when editing an existing region) -->
+    <template v-if="regionMenu.targetRegionId !== null">
+      <div class="border-t border-gray-700 my-0.5" />
+      <div
+        class="flex items-center gap-2 px-3 py-1.5 cursor-pointer text-red-400 hover:bg-gray-700 transition-colors"
+        @mousedown.stop="onRegionMenuDelete"
+      >
+        <span>✕</span>
+        <span>{{ regionMenuI18n.delete }}</span>
       </div>
     </template>
   </div>

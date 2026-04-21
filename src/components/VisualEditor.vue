@@ -10,7 +10,9 @@ const props = defineProps({
   edges:       { type: Array, required: true },
   activations: { type: Array, default: () => [] },
   regions:     { type: Array, default: () => [] },
-  lang:        { type: String, default: 'en' },
+  subgraphs:   { type: Array, default: () => [] },
+  lang:             { type: String,  default: 'en' },
+  seqFlowCountInit: { type: Number,  default: null },
 })
 
 const emit = defineEmits([
@@ -21,6 +23,7 @@ const emit = defineEmits([
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
+  'add-subgraph', 'update-subgraph', 'delete-subgraph',
   'clear',
 ])
 
@@ -97,8 +100,13 @@ const toolbarConfig = computed(() => {
   }
 })
 
-// ── reset selections when diagram type changes ────────────────────────────────
+// ── sync seqFlowCount when a file is loaded ───────────────────────────────────
 import { watch } from 'vue'
+watch(() => props.seqFlowCountInit, (v) => {
+  if (v != null && v > 0) seqFlowCount.value = v
+})
+
+// ── reset selections when diagram type changes ────────────────────────────────
 watch(() => props.diagramType, () => {
   const cfg = toolbarConfig.value
   selectedNodeType.value = cfg.nodeTypes[0]?.type || 'process'
@@ -126,6 +134,9 @@ function onInsertSlot(slotIdx, position) {
 function onAddRegion(startSlot, endSlot, type, label) { emit('add-region', startSlot, endSlot, type, label) }
 function onUpdateRegion(id, updates) { emit('update-region', id, updates) }
 function onDeleteRegion(id) { emit('delete-region', id) }
+function onAddSubgraph(x, y, w, h) { emit('add-subgraph', x, y, w, h) }
+function onUpdateSubgraph(id, updates) { emit('update-subgraph', id, updates) }
+function onDeleteSubgraph(id) { emit('delete-subgraph', id) }
 
 // ── hint i18n ─────────────────────────────────────────────────────────────────
 const HINTS = {
@@ -285,6 +296,7 @@ function directionClass(d) {
         :edges="edges"
         :activations="activations"
         :regions="regions"
+        :subgraphs="subgraphs"
         :diagram-type="diagramType"
         :mode="mode"
         :selected-node-type="selectedNodeType"
@@ -308,6 +320,9 @@ function directionClass(d) {
         @add-region="onAddRegion"
         @update-region="onUpdateRegion"
         @delete-region="onDeleteRegion"
+        @add-subgraph="onAddSubgraph"
+        @update-subgraph="onUpdateSubgraph"
+        @delete-subgraph="onDeleteSubgraph"
       />
     </div>
   </div>

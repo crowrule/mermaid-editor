@@ -1,3 +1,26 @@
+// Inner fill colors for nested regions (depth > 0), matching DiagramCanvas REGION_INNER_COLORS
+const INNER_REGION_RGB = {
+  rect:     'rgb(15, 118, 110)',
+  alt:      'rgb(76, 29, 149)',
+  par:      'rgb(29, 78, 216)',
+  critical: 'rgb(185, 28, 28)',
+  break:    'rgb(194, 65, 12)',
+  opt:      'rgb(21, 128, 61)',
+  loop:     'rgb(14, 116, 144)',
+}
+
+function computeRegionDepths(regions) {
+  const depths = new Map()
+  for (const r of regions) {
+    let depth = 0
+    for (const other of regions) {
+      if (other.id !== r.id && other.startSlot <= r.startSlot && r.endSlot <= other.endSlot) depth++
+    }
+    depths.set(r.id, depth)
+  }
+  return depths
+}
+
 // Maps node index to letters: 0→A, 1→B, ..., 25→Z, 26→AA, etc.
 function indexToLetter(i) {
   let result = ''
@@ -9,44 +32,67 @@ function indexToLetter(i) {
   return result
 }
 
-function generateFlowchart(nodes, edges, direction) {
+function generateFlowchart(nodes, edges, direction, subgraphs = []) {
   const dir = direction || 'TD'
   if (nodes.length === 0) return `flowchart ${dir}`
   const lines = [`flowchart ${dir}`]
   const idMap = new Map() // node.id → mermaid letter ID
-  nodes.forEach((node, i) => {
-    const id = indexToLetter(i)
-    idMap.set(node.id, id)
+  nodes.forEach((node, i) => idMap.set(node.id, indexToLetter(i)))
+
+  function nodeDecl(node, indent) {
+    const id    = idMap.get(node.id)
     const label = node.label || id
+    let decl
     switch (node.type) {
-      case 'decision':
-        lines.push(`  ${id}{${label}}`)
-        break
-      case 'terminal':
-        lines.push(`  ${id}([${label}])`)
-        break
-      case 'io':
-        lines.push(`  ${id}[/${label}/]`)
-        break
-      case 'database':
-        lines.push(`  ${id}[(${label})]`)
-        break
-      case 'subprocess':
-        lines.push(`  ${id}[[${label}]]`)
-        break
-      case 'multiprocess':
-        lines.push(`  ${id}@{ shape: procs, label: "${label}" }`)
-        break
-      case 'reference':
-        lines.push(`  ${id}((${label}))`)
-        break
-      default: // process
-        lines.push(`  ${id}[${label}]`)
+      case 'decision':    decl = `${id}{${label}}`; break
+      case 'terminal':    decl = `${id}([${label}])`; break
+      case 'io':          decl = `${id}[/${label}/]`; break
+      case 'database':    decl = `${id}[(${label})]`; break
+      case 'subprocess':  decl = `${id}[[${label}]]`; break
+      case 'multiprocess':decl = `${id}@{ shape: procs, label: "${label}" }`; break
+      case 'reference':   decl = `${id}((${label}))`; break
+      default:            decl = `${id}[${label}]`
     }
+    lines.push(`${indent}${decl}`)
+  }
+
+  // Assign each node to the smallest subgraph that contains it
+  function smallestSg(node) {
+    let best = null
+    for (const sg of subgraphs) {
+      if (node.x >= sg.x && node.x <= sg.x + sg.width &&
+          node.y >= sg.y && node.y <= sg.y + sg.height) {
+        if (!best || sg.width * sg.height < best.width * best.height) best = sg
+      }
+    }
+    return best
+  }
+
+  const assignedNodeIds = new Set()
+
+  // Emit subgraph blocks (sorted largest-first so outer wraps inner)
+  const sortedSgs = [...subgraphs].sort((a, b) => b.width * b.height - a.width * a.height)
+  sortedSgs.forEach(sg => {
+    const sgId = `_sg${sg.id}`
+    lines.push(`  subgraph ${sgId} [${sg.label}]`)
+    nodes.forEach(node => {
+      if (smallestSg(node)?.id === sg.id) {
+        nodeDecl(node, '    ')
+        assignedNodeIds.add(node.id)
+      }
+    })
+    lines.push(`  end`)
   })
+
+  // Nodes not in any subgraph
+  nodes.forEach(node => {
+    if (!assignedNodeIds.has(node.id)) nodeDecl(node, '  ')
+  })
+
+  // All edges
   edges.forEach(edge => {
     const fromId = idMap.get(edge.from)
-    const toId = idMap.get(edge.to)
+    const toId   = idMap.get(edge.to)
     if (!fromId || !toId) return
     const lbl = edge.label
     switch (edge.edgeType) {
@@ -77,6 +123,9 @@ function generateSequence(nodes, edges, autonumber, activations = [], regions = 
     const keyword = node.type === 'actor' ? 'actor' : 'participant'
     lines.push(`  ${keyword} ${id} as ${node.label}`)
   })
+  // Precompute depths and region lookup for nested color handling
+  const regionDepths = computeRegionDepths(regions)
+  const regionById = new Map(regions.map(r => [r.id, r]))
   // Build unified event list: messages + activation boundaries ordered by slot
   const events = []
   edges.forEach(edge => {
@@ -102,9 +151,15 @@ function generateSequence(nodes, edges, autonumber, activations = [], regions = 
       if (id) lines.push(`  ${ev.type} ${id}`)
     } else if (ev.type === 'region-start') {
       const { region } = ev
+      const depth = regionDepths.get(region.id) ?? 0
       if (region.type === 'rect') {
-        lines.push(`  rect rgb(0, 179, 179)`)
+        const rgb = depth > 0 ? INNER_REGION_RGB.rect : 'rgb(0, 179, 179)'
+        lines.push(`  rect ${rgb}`)
       } else {
+        if (depth > 0) {
+          const rgb = INNER_REGION_RGB[region.type] || 'rgb(100, 100, 100)'
+          lines.push(`  rect ${rgb}`)
+        }
         const lbl = region.label ? ` ${region.label}` : ''
         lines.push(`  ${region.type}${lbl}`)
       }
@@ -114,7 +169,13 @@ function generateSequence(nodes, edges, autonumber, activations = [], regions = 
       const lbl = divider.label ? ` ${divider.label}` : ''
       lines.push(`  ${kw}${lbl}`)
     } else if (ev.type === 'region-end') {
+      const region = regionById.get(ev.regionId)
+      const depth = region ? (regionDepths.get(ev.regionId) ?? 0) : 0
       lines.push(`  end`)
+      // Close the wrapping rect block for nested non-rect regions
+      if (depth > 0 && region && region.type !== 'rect') {
+        lines.push(`  end`)
+      }
     } else {
       const { edge } = ev
       const fromId = idMap.get(edge.from)
@@ -203,6 +264,6 @@ export function generateCode(type, nodes, edges, options) {
     case 'sequence': return generateSequence(nodes, edges, options?.autonumber, options?.activations, options?.regions)
     case 'er':       return generateER(nodes, edges, dir)
     case 'class':    return generateClass(nodes, edges, dir)
-    default:         return generateFlowchart(nodes, edges, dir)
+    default:         return generateFlowchart(nodes, edges, dir, options?.subgraphs)
   }
 }
