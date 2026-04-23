@@ -297,7 +297,8 @@ function handleDeleteRegion(id) {
 }
 
 function handleAddSubgraph(x, y, width, height) {
-  subgraphs.value.push({ id: subgraphIdCounter++, label: `Group ${subgraphIdCounter - 1}`, x, y, width, height })
+  const labelPrefix = diagramType.value === 'class' ? 'Namespace' : 'Group'
+  subgraphs.value.push({ id: subgraphIdCounter++, label: `${labelPrefix}${subgraphIdCounter - 1}`, x, y, width, height })
 }
 function handleUpdateSubgraph(id, updates) {
   const sg = subgraphs.value.find(s => s.id === id)

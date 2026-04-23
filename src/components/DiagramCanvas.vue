@@ -446,7 +446,33 @@ const emptyHint = computed(() => {
 })
 
 // ── sequence layout helpers ───────────────────────────────────────────────────
-const isSequence = computed(() => props.diagramType === 'sequence')
+const isSequence  = computed(() => props.diagramType === 'sequence')
+// Only flowchart and class diagram support grouping (subgraph / namespace)
+const isGroupable = computed(() => props.diagramType === 'flowchart' || props.diagramType === 'class')
+
+// Visual style for subgraph (flowchart) vs namespace (class diagram)
+const sgStyle = computed(() => {
+  if (props.diagramType === 'class') {
+    return {
+      fill:        'rgba(16,185,129,0.08)',
+      stroke:      '#10b981',
+      badgeFill:   '#065f46',
+      textFill:    '#6ee7b7',
+      editorStyle: 'width:100%;height:100%;background:#022c22;color:#6ee7b7;border:1px solid #10b981;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;',
+      defaultLabel: 'namespace',
+      previewFill:  'rgba(16,185,129,0.07)',
+    }
+  }
+  return {
+    fill:        'rgba(99,102,241,0.1)',
+    stroke:      '#6366f1',
+    badgeFill:   '#4338ca',
+    textFill:    '#c7d2fe',
+    editorStyle: 'width:100%;height:100%;background:#1e1b4b;color:#c7d2fe;border:1px solid #818cf8;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;',
+    defaultLabel: 'subgraph',
+    previewFill:  'rgba(99,102,241,0.07)',
+  }
+})
 
 // Height of the scrollable body SVG
 const seqBodyHeight = computed(() =>
@@ -707,8 +733,8 @@ function onBgMousedown(e) {
     return
   }
 
-  // Flowchart select: start subgraph drag-to-draw
-  if (!isSequence.value && props.mode === 'select') {
+  // Flowchart/Class select: start subgraph/namespace drag-to-draw
+  if (isGroupable.value && props.mode === 'select') {
     const pt = svgPoint(e)
     sgDragStart = { x: pt.x, y: pt.y }
     return
@@ -1749,14 +1775,14 @@ function onKeyDown(e) {
       @mousedown="onBgMousedown"
     />
 
-    <!-- ── subgraphs (rendered behind edges and nodes) ── -->
+    <!-- ── subgraphs / namespaces (rendered behind edges and nodes) ── -->
     <g v-for="sg in subgraphs" :key="'sg-' + sg.id"
        @mousedown.stop="onSgMousedown($event, sg)"
        @dblclick.stop="startSgLabelEdit(sg)">
       <rect
         :x="sg.x" :y="sg.y" :width="sg.width" :height="sg.height"
-        fill="rgba(99,102,241,0.1)"
-        :stroke="selectedSgId === sg.id ? '#f59e0b' : '#6366f1'"
+        :fill="sgStyle.fill"
+        :stroke="selectedSgId === sg.id ? '#f59e0b' : sgStyle.stroke"
         :stroke-width="selectedSgId === sg.id ? 2 : 1.5"
         stroke-dasharray="6 4"
         rx="6"
@@ -1765,13 +1791,13 @@ function onKeyDown(e) {
       <!-- label badge -->
       <rect v-if="editingSgId !== sg.id"
         :x="sg.x + 6" :y="sg.y + 4"
-        :width="(sg.label || 'subgraph').length * 7 + 14" height="18"
-        rx="3" fill="#4338ca" fill-opacity="0.85"
+        :width="(sg.label || sgStyle.defaultLabel).length * 7 + 14" height="18"
+        rx="3" :fill="sgStyle.badgeFill" fill-opacity="0.85"
       />
       <text v-if="editingSgId !== sg.id"
         :x="sg.x + 13" :y="sg.y + 16"
-        fill="#c7d2fe" font-size="11" font-weight="bold" pointer-events="none"
-      >{{ sg.label || 'subgraph' }}</text>
+        :fill="sgStyle.textFill" font-size="11" font-weight="bold" pointer-events="none"
+      >{{ sg.label || sgStyle.defaultLabel }}</text>
       <!-- inline label editor -->
       <foreignObject v-if="editingSgId === sg.id"
         :x="sg.x + 6" :y="sg.y + 4" width="160" height="20">
@@ -1780,7 +1806,7 @@ function onKeyDown(e) {
                  @keydown.enter.stop="commitSgLabel"
                  @keydown.escape.stop="editingSgId = null"
                  @blur="commitSgLabel"
-                 style="width:100%;height:100%;background:#1e1b4b;color:#c7d2fe;border:1px solid #818cf8;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;" />
+                 :style="sgStyle.editorStyle" />
         </div>
       </foreignObject>
     </g>
@@ -1789,8 +1815,8 @@ function onKeyDown(e) {
     <rect v-if="sgDragPreview"
       :x="sgDragPreview.x" :y="sgDragPreview.y"
       :width="sgDragPreview.width" :height="sgDragPreview.height"
-      fill="rgba(99,102,241,0.07)"
-      stroke="#6366f1" stroke-width="1.5" stroke-dasharray="6 4"
+      :fill="sgStyle.previewFill"
+      :stroke="sgStyle.stroke" stroke-width="1.5" stroke-dasharray="6 4"
       rx="6" pointer-events="none"
     />
 

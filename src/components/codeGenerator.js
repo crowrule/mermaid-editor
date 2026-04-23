@@ -233,7 +233,7 @@ function generateER(nodes, edges, direction) {
   return lines.join('\n')
 }
 
-function generateClass(nodes, edges, direction) {
+function generateClass(nodes, edges, direction, namespaces = []) {
   const dir = direction || 'TD'
   // mermaid v11 requires at least one statement after classDiagram header;
   // use direction as a minimal valid placeholder when the canvas is empty.
@@ -241,24 +241,57 @@ function generateClass(nodes, edges, direction) {
   if (nodes.length === 0) return `classDiagram\n  direction ${mermaidDir}`
   const lines = ['classDiagram']
   if (dir !== 'TD') lines.push(`  direction ${mermaidDir}`)
-  nodes.forEach(node => {
+
+  function emitNode(node, indent) {
     const members = node.members || []
     if (members.length > 0) {
-      lines.push(`  class ${node.label} {`)
+      lines.push(`${indent}class ${node.label} {`)
       members.forEach(m => {
         // Method: visibility name(params) returnType  e.g. +eat() void
         // Field:  visibility type name                e.g. +String name
         if (m.name.includes('(')) {
-          lines.push(`    ${m.visibility}${m.name} ${m.type}`)
+          lines.push(`${indent}  ${m.visibility}${m.name} ${m.type}`)
         } else {
-          lines.push(`    ${m.visibility}${m.type} ${m.name}`)
+          lines.push(`${indent}  ${m.visibility}${m.type} ${m.name}`)
         }
       })
-      lines.push(`  }`)
+      lines.push(`${indent}}`)
     } else {
-      lines.push(`  class ${node.label}`)
+      lines.push(`${indent}class ${node.label}`)
     }
+  }
+
+  // Assign each node to the smallest namespace that contains it
+  function smallestNs(node) {
+    let best = null
+    for (const ns of namespaces) {
+      if (node.x >= ns.x && node.x <= ns.x + ns.width &&
+          node.y >= ns.y && node.y <= ns.y + ns.height) {
+        if (!best || ns.width * ns.height < best.width * best.height) best = ns
+      }
+    }
+    return best
+  }
+
+  const assignedNodeIds = new Set()
+  // Emit largest namespaces first so outer wraps inner
+  const sortedNs = [...namespaces].sort((a, b) => b.width * b.height - a.width * a.height)
+  sortedNs.forEach(ns => {
+    const nsNodes = nodes.filter(n => smallestNs(n)?.id === ns.id)
+    if (nsNodes.length === 0) return
+    lines.push(`  namespace ${ns.label || 'Namespace'} {`)
+    nsNodes.forEach(node => {
+      emitNode(node, '    ')
+      assignedNodeIds.add(node.id)
+    })
+    lines.push(`  }`)
   })
+
+  // Nodes not in any namespace
+  nodes.forEach(node => {
+    if (!assignedNodeIds.has(node.id)) emitNode(node, '  ')
+  })
+
   edges.forEach(edge => {
     const fromNode = nodes.find(n => n.id === edge.from)
     const toNode = nodes.find(n => n.id === edge.to)
@@ -285,7 +318,7 @@ export function generateCode(type, nodes, edges, options) {
   switch (type) {
     case 'sequence': return generateSequence(nodes, edges, options?.autonumber, options?.activations, options?.regions)
     case 'er':       return generateER(nodes, edges, dir)
-    case 'class':    return generateClass(nodes, edges, dir)
+    case 'class':    return generateClass(nodes, edges, dir, options?.subgraphs)
     default:         return generateFlowchart(nodes, edges, dir, options?.subgraphs)
   }
 }
