@@ -216,13 +216,25 @@ function handleAddEdge(fromId, toId, edgeType, slot) {
     const exists = edges.value.some(e => e.from === fromId && e.to === toId)
     if (exists) return
   }
-  // ER always defaults to 1:N; other types use the toolbar selection
-  const type = diagramType.value === 'er' ? '||--o{' : (edgeType || 'arrow')
+  // ER always defaults to 1:N; class defaults to assoc; others use toolbar selection
+  const type = diagramType.value === 'er'    ? '||--o{'
+             : diagramType.value === 'class' ? 'assoc'
+             : (edgeType || 'arrow')
+  const CLASS_RELATION_LABELS = {
+    'inherit':     'Inheritance',
+    'realize':     'Realization',
+    'compose':     'Composition',
+    'aggregate':   'Aggregation',
+    'assoc':       'Association',
+    'dependent':   'Dependency',
+    'link-solid':  'Link (Solid)',
+    'link-dashed': 'Link (Dashed)',
+  }
   const edge = {
     id: edgeIdCounter++,
     from: fromId,
     to: toId,
-    label: '',
+    label: diagramType.value === 'class' ? (CLASS_RELATION_LABELS[type] ?? '') : '',
     edgeType: type,
   }
   if (slot !== undefined) edge.slot = slot

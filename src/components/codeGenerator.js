@@ -265,10 +265,14 @@ function generateClass(nodes, edges, direction) {
     if (!fromNode || !toNode) return
     let rel
     switch (edge.edgeType) {
-      case 'inherit':   rel = '<|--'; break
-      case 'compose':   rel = '*--';  break
-      case 'aggregate': rel = 'o--';  break
-      default:          rel = '-->'; break
+      case 'inherit':     rel = '<|--'; break
+      case 'compose':     rel = '*--';  break
+      case 'aggregate':   rel = 'o--';  break
+      case 'dependent':   rel = '..>';  break
+      case 'realize':     rel = '..|>'; break
+      case 'link-solid':  rel = '--';   break
+      case 'link-dashed': rel = '..';   break
+      default:            rel = '-->'; break  // assoc
     }
     const label = edge.label ? ` : ${edge.label}` : ''
     lines.push(`  ${fromNode.label} ${rel} ${toNode.label}${label}`)

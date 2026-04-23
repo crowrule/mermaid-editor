@@ -55,6 +55,18 @@ function parseERSides(edgeType) {
   }
 }
 
+// ── class diagram relation types ──────────────────────────────────────────────
+const CLASS_RELATIONS = [
+  { type: 'inherit',     label: 'Inheritance',   symbol: '<|--' },
+  { type: 'realize',     label: 'Realization',   symbol: '..|>' },
+  { type: 'compose',     label: 'Composition',   symbol: '*--'  },
+  { type: 'aggregate',   label: 'Aggregation',   symbol: 'o--'  },
+  { type: 'assoc',       label: 'Association',   symbol: '-->'  },
+  { type: 'dependent',   label: 'Dependency',    symbol: '..>'  },
+  { type: 'link-solid',  label: 'Link (Solid)',  symbol: '--'   },
+  { type: 'link-dashed', label: 'Link (Dashed)', symbol: '..'   },
+]
+
 // ── region types ─────────────────────────────────────────────────────────────
 const REGION_TYPES = [
   { type: 'rect',     label: 'rect',     fill: '#042f2e', stroke: '#2dd4bf' },
@@ -401,6 +413,10 @@ function erEntityCenter(node) {
 function classNodeHeight(node) {
   return NODE_H + (node.members?.length || 0) * 20
 }
+// Geometric center of the full class box (shifted down when members exist)
+function classNodeCenter(node) {
+  return { x: node.x, y: node.y + (node.members?.length || 0) * 10 }
+}
 
 // ── empty state hints ─────────────────────────────────────────────────────────
 const REGION_MENU_I18N = {
@@ -552,6 +568,17 @@ function edgePath(edge) {
     }
     return `M${x1},${y} L${x2},${y}`
   }
+  // Class: path using geometric center of expanded class box (accounts for members)
+  if (props.diagramType === 'class') {
+    const fc = classNodeCenter(fromNode)
+    const tc = classNodeCenter(toNode)
+    const dx = tc.x - fc.x, dy = tc.y - fc.y
+    const len = Math.sqrt(dx * dx + dy * dy) || 1
+    const ux = dx / len, uy = dy / len
+    const fp = entityBoundaryPoint(fc.x, fc.y,  ux,  uy, NODE_W / 2, classNodeHeight(fromNode) / 2)
+    const tp = entityBoundaryPoint(tc.x, tc.y, -ux, -uy, NODE_W / 2, classNodeHeight(toNode)   / 2)
+    return `M${fp.x},${fp.y} L${tp.x},${tp.y}`
+  }
   // ER: path from entity boundary to entity boundary using geometric center of expanded box
   if (props.diagramType === 'er') {
     const fc = erEntityCenter(fromNode)
@@ -599,6 +626,9 @@ function edgeMidpoint(edge) {
 
 function edgeStrokeDasharray(edgeType) {
   if (props.diagramType === 'er') return 'none'
+  if (props.diagramType === 'class') {
+    return ['dependent', 'realize', 'link-dashed'].includes(edgeType) ? '6 4' : 'none'
+  }
   if (edgeType === 'dotted' || edgeType === '-->>') return '6 4'
   return 'none'
 }
@@ -617,12 +647,33 @@ const ER_END_MARKER = {
 }
 
 function edgeMarkerStart(edge) {
+  if (props.diagramType === 'class') {
+    const sel = selectedEdgeId.value === edge.id
+    switch (edge.edgeType) {
+      case 'inherit':   return sel ? 'url(#cls-inh-sel)'  : 'url(#cls-inh)'
+      case 'compose':   return sel ? 'url(#cls-cmp-sel)'  : 'url(#cls-cmp)'
+      case 'aggregate': return sel ? 'url(#cls-agg-sel)'  : 'url(#cls-agg)'
+      default:          return ''
+    }
+  }
   if (props.diagramType !== 'er') return ''
   const { left } = parseERSides(edge.edgeType)
   return ER_START_MARKER[left] ?? 'url(#er-s-exact-one)'
 }
 
 function edgeMarkerEnd(edge) {
+  if (props.diagramType === 'class') {
+    const sel = selectedEdgeId.value === edge.id
+    switch (edge.edgeType) {
+      case 'inherit':
+      case 'compose':
+      case 'aggregate':
+      case 'link-solid':
+      case 'link-dashed': return ''
+      case 'realize':     return sel ? 'url(#cls-rlz-sel)' : 'url(#cls-rlz)'
+      default:            return sel ? 'url(#arrowHeadSel)' : 'url(#arrowHead)'  // assoc, dependent
+    }
+  }
   if (props.diagramType !== 'er') {
     if (edge.edgeType === 'open') return ''
     if (edge.edgeType === 'cross') return 'url(#arrowCross)'
@@ -721,11 +772,30 @@ function onNodeDown(e, node) {
 }
 
 function onEdgeContextMenu(e, edge) {
-  if (props.diagramType !== 'er') return
+  if (props.diagramType !== 'er' && props.diagramType !== 'class') return
   const rect = containerRef.value.getBoundingClientRect()
   ctxX.value = e.clientX - rect.left
   ctxY.value = e.clientY - rect.top
   ctxEdgeId.value = edge.id
+}
+
+const CLASS_RELATION_LABELS = {
+  'inherit':     'Inheritance',
+  'realize':     'Realization',
+  'compose':     'Composition',
+  'aggregate':   'Aggregation',
+  'assoc':       'Association',
+  'dependent':   'Dependency',
+  'link-solid':  'Link (Solid)',
+  'link-dashed': 'Link (Dashed)',
+}
+
+function selectClassRelation(type) {
+  if (ctxEdgeId.value !== null) {
+    emit('update-edge-type', ctxEdgeId.value, type)
+    emit('update-edge-label', ctxEdgeId.value, CLASS_RELATION_LABELS[type] ?? '')
+  }
+  ctxEdgeId.value = null
 }
 
 function selectFromCard(card) {
@@ -1597,6 +1667,36 @@ function onKeyDown(e) {
         <line x1="10" y1="0" x2="0" y2="10" stroke="#f87171" stroke-width="2"/>
       </marker>
 
+      <!-- ── Class diagram relation markers ── -->
+      <!-- Hollow triangle START — inherit (◁ at fromNode/parent, tip touches boundary) -->
+      <marker id="cls-inh" markerWidth="15" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 14,0 L 14,12 Z" fill="#030712" stroke="#818cf8" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <marker id="cls-inh-sel" markerWidth="15" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 14,0 L 14,12 Z" fill="#030712" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <!-- Hollow triangle END — realize (▷ at toNode/interface, tip touches boundary) -->
+      <marker id="cls-rlz" markerWidth="15" markerHeight="12" refX="14" refY="6" orient="auto">
+        <path d="M 14,6 L 0,0 L 0,12 Z" fill="#030712" stroke="#818cf8" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <marker id="cls-rlz-sel" markerWidth="15" markerHeight="12" refX="14" refY="6" orient="auto">
+        <path d="M 14,6 L 0,0 L 0,12 Z" fill="#030712" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <!-- Filled diamond START — compose (◆ at fromNode/whole) -->
+      <marker id="cls-cmp" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#818cf8" stroke="#818cf8" stroke-width="1"/>
+      </marker>
+      <marker id="cls-cmp-sel" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#f59e0b" stroke="#f59e0b" stroke-width="1"/>
+      </marker>
+      <!-- Hollow diamond START — aggregate (◇ at fromNode/whole) -->
+      <marker id="cls-agg" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#030712" stroke="#818cf8" stroke-width="1.5"/>
+      </marker>
+      <marker id="cls-agg-sel" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#030712" stroke="#f59e0b" stroke-width="1.5"/>
+      </marker>
+
       <!-- ER cardinality markers — START (entity at low-x, path goes right) -->
       <!-- || exactly one: two bars -->
       <marker id="er-s-exact-one" markerWidth="9" markerHeight="14" refX="1" refY="7" orient="auto">
@@ -2241,9 +2341,31 @@ function onKeyDown(e) {
     >{{ emptyHint }}</text>
   </svg>
 
+  <!-- ── Class relation type context menu ── -->
+  <div
+    v-if="ctxEdgeId !== null && diagramType === 'class'"
+    :style="{ position: 'absolute', left: ctxX + 'px', top: ctxY + 'px', zIndex: 50 }"
+    class="bg-gray-800 border border-gray-600 rounded shadow-xl py-1 w-52 text-sm"
+    @mousedown.stop
+  >
+    <div class="px-3 py-1 text-xs text-indigo-400 font-semibold tracking-wide">Relation Type</div>
+    <div
+      v-for="rel in CLASS_RELATIONS"
+      :key="rel.type"
+      :class="[
+        'flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors',
+        ctxEdge?.edgeType === rel.type ? 'bg-indigo-700 text-white' : 'text-gray-200 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectClassRelation(rel.type)"
+    >
+      <code class="w-10 text-center font-mono text-xs opacity-75 shrink-0">{{ rel.symbol }}</code>
+      <span>{{ rel.label }}</span>
+    </div>
+  </div>
+
   <!-- ── ER relation cardinality context menu ── -->
   <div
-    v-if="ctxEdgeId !== null"
+    v-if="ctxEdgeId !== null && diagramType === 'er'"
     :style="{ position: 'absolute', left: ctxX + 'px', top: ctxY + 'px', zIndex: 50 }"
     class="bg-gray-800 border border-gray-600 rounded shadow-xl py-1 w-52 text-sm"
     @mousedown.stop

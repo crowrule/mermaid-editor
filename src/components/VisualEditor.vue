@@ -73,12 +73,7 @@ const toolbarConfig = computed(() => {
         nodeTypes: [
           { type: 'class', label: '□ Class' },
         ],
-        edgeTypes: [
-          { type: 'inherit',   label: '◁ Inherit' },
-          { type: 'compose',   label: '● Compose' },
-          { type: 'aggregate', label: '◇ Aggregate' },
-          { type: 'assoc',     label: '→ Assoc' },
-        ],
+        edgeTypes: [], // set via right-click context menu on the relation line
       }
     default: // flowchart
       return {
