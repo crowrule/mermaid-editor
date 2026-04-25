@@ -205,6 +205,11 @@ function handleDeleteMember(nodeId, index) {
   node.members.splice(index, 1)
 }
 
+function handleUpdateAnnotation(nodeId, annotation) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (node) node.annotation = annotation || undefined
+}
+
 function handleMoveNode(id, x, y) {
   const node = nodes.value.find(n => n.id === id)
   if (node) { node.x = x; node.y = y }
@@ -565,6 +570,7 @@ function onLangMenuClickOutside(e) {
         @add-member="handleAddMember"
         @update-member="handleUpdateMember"
         @delete-member="handleDeleteMember"
+        @update-annotation="handleUpdateAnnotation"
         @update:diagram-direction="diagramDirection = $event"
         @update:seq-auto-number="seqAutoNumber = $event"
         @add-activation="handleAddActivation"

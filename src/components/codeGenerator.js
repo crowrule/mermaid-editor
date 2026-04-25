@@ -244,8 +244,9 @@ function generateClass(nodes, edges, direction, namespaces = []) {
 
   function emitNode(node, indent) {
     const members = node.members || []
-    if (members.length > 0) {
+    if (members.length > 0 || node.annotation) {
       lines.push(`${indent}class ${node.label} {`)
+      if (node.annotation) lines.push(`${indent}  <<${node.annotation}>>`)
       members.forEach(m => {
         // Method: visibility name(params) returnType  e.g. +eat() void
         // Field:  visibility type name                e.g. +String name

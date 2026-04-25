@@ -21,6 +21,7 @@ const emit = defineEmits([
   'delete-node', 'delete-edge', 'update-node-label', 'update-edge-label',
   'add-attribute', 'delete-attribute', 'update-edge-type',
   'add-member', 'update-member', 'delete-member',
+  'update-annotation',
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
@@ -54,6 +55,14 @@ function parseERSides(edgeType) {
     default:           return { left: '||', right: 'o{' }
   }
 }
+
+// ── class diagram annotation types ───────────────────────────────────────────
+const CLASS_ANNOTATIONS = [
+  { type: 'interface',   label: 'Interface'   },
+  { type: 'abstract',    label: 'Abstract'    },
+  { type: 'service',     label: 'Service'     },
+  { type: 'enumeration', label: 'Enumeration' },
+]
 
 // ── class diagram relation types ──────────────────────────────────────────────
 const CLASS_RELATIONS = [
@@ -159,7 +168,8 @@ function onDocMousedown(e) {
   dividerCtxMenu.value = null
   regionCtxMenu.value  = null
   if (containerRef.value && !containerRef.value.contains(e.target)) {
-    ctxEdgeId.value = null
+    ctxEdgeId.value      = null
+    annotCtxNodeId.value = null
     slotCtxVisible.value = false
   }
 }
@@ -318,6 +328,11 @@ const editMemberName         = ref('')
 const editMemberTypeInputRef = ref(null)
 const editMemberNameInputRef = ref(null)
 
+// class annotation context menu
+const annotCtxNodeId = ref(null)
+const annotCtxX      = ref(0)
+const annotCtxY      = ref(0)
+
 // inline edit — edge
 const editingEdgeId = ref(null)
 const editEdgeLabel = ref('')
@@ -389,6 +404,7 @@ watch(() => props.diagramType, () => {
   editingMemberIndex.value  = null
   connectSource.value       = null
   ctxEdgeId.value          = null
+  annotCtxNodeId.value     = null
   regionMenu.value         = null
   sgDragStart              = null
   sgDragPreview.value      = null
@@ -866,7 +882,12 @@ function onMouseUp() {
   if (sgDragStart) {
     const prev = sgDragPreview.value
     if (prev && prev.width > 40 && prev.height > 40) {
-      emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
+      // For class diagram: only create namespace if it contains at least one node
+      const hasNode = props.diagramType !== 'class' || props.nodes.some(n =>
+        n.x >= prev.x && n.x <= prev.x + prev.width &&
+        n.y >= prev.y && n.y <= prev.y + prev.height
+      )
+      if (hasNode) emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
     }
     sgDragStart = null
     sgDragPreview.value = null
@@ -1289,6 +1310,21 @@ function commitSgLabel() {
   editingSgId.value = null
 }
 
+// ── class node annotation context menu ───────────────────────────────────────
+function onClassNodeContextMenu(e, node) {
+  if (props.diagramType !== 'class') return
+  const rect = containerRef.value.getBoundingClientRect()
+  annotCtxX.value      = e.clientX - rect.left
+  annotCtxY.value      = e.clientY - rect.top
+  annotCtxNodeId.value = node.id
+}
+
+function selectAnnotation(annotation) {
+  if (annotCtxNodeId.value !== null)
+    emit('update-annotation', annotCtxNodeId.value, annotation)
+  annotCtxNodeId.value = null
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
@@ -1327,6 +1363,7 @@ function onKeyDown(e) {
     editingMemberNodeId.value  = null
     editingMemberIndex.value   = null
     ctxEdgeId.value            = null
+    annotCtxNodeId.value       = null
     regionMenu.value           = null
     resizingRegionId.value     = null
     resizePreviewEndSlot.value = null
@@ -1800,7 +1837,7 @@ function onKeyDown(e) {
       >{{ sg.label || sgStyle.defaultLabel }}</text>
       <!-- inline label editor -->
       <foreignObject v-if="editingSgId === sg.id"
-        :x="sg.x + 6" :y="sg.y + 4" width="160" height="20">
+        :x="sg.x + 6" :y="sg.y + 4" width="160" height="28">
         <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
           <input ref="editSgLabelRef" v-model="editSgLabel"
                  @keydown.enter.stop="commitSgLabel"
@@ -1858,6 +1895,7 @@ function onKeyDown(e) {
       :class="['cursor-pointer select-none', mode === 'delete' ? 'cursor-not-allowed' : '']"
       @mousedown.stop="onNodeDown($event, node)"
       @dblclick.stop="startEdit(node)"
+      @contextmenu.prevent.stop="onClassNodeContextMenu($event, node)"
     >
       <!-- process / participant → plain rect -->
       <template v-if="['process','participant'].includes(node.type)">
@@ -1881,6 +1919,14 @@ function onKeyDown(e) {
           :stroke="strokeColor(node)"
           stroke-width="2"
         />
+        <!-- annotation «interface» etc. -->
+        <text
+          v-if="node.annotation && editingNodeId !== node.id"
+          :x="effectiveX(node)"
+          :y="effectiveY(node) - 9"
+          fill="#a5b4fc" font-size="9" font-style="italic"
+          text-anchor="middle" dominant-baseline="middle" pointer-events="none"
+        >«{{ node.annotation }}»</text>
         <!-- header/body divider -->
         <line
           v-if="node.members?.length"
@@ -2180,7 +2226,7 @@ function onKeyDown(e) {
       <text
         v-if="editingNodeId !== node.id"
         :x="effectiveX(node)"
-        :y="effectiveY(node) + (node.type === 'actor' ? 38 : 5)"
+        :y="effectiveY(node) + (node.type === 'actor' ? 38 : (node.type === 'class' && node.annotation ? 10 : 5))"
         fill="#f3f4f6"
         font-size="13"
         text-anchor="middle"
@@ -2387,6 +2433,37 @@ function onKeyDown(e) {
       <code class="w-10 text-center font-mono text-xs opacity-75 shrink-0">{{ rel.symbol }}</code>
       <span>{{ rel.label }}</span>
     </div>
+  </div>
+
+  <!-- ── Class node annotation context menu ── -->
+  <div
+    v-if="annotCtxNodeId !== null && diagramType === 'class'"
+    :style="{ position: 'absolute', left: annotCtxX + 'px', top: annotCtxY + 'px', zIndex: 50 }"
+    class="bg-gray-800 border border-gray-600 rounded shadow-xl py-1 w-44 text-sm"
+    @mousedown.stop
+  >
+    <div class="px-3 py-1 text-xs text-indigo-400 font-semibold tracking-wide">Annotation</div>
+    <div
+      v-for="ann in CLASS_ANNOTATIONS"
+      :key="ann.type"
+      :class="[
+        'px-3 py-1.5 cursor-pointer font-mono text-xs transition-colors',
+        nodes.find(n => n.id === annotCtxNodeId)?.annotation === ann.type
+          ? 'bg-indigo-700 text-white'
+          : 'text-gray-200 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectAnnotation(ann.type)"
+    >&lt;&lt;{{ ann.type }}&gt;&gt;</div>
+    <div class="my-1 border-t border-gray-700" />
+    <div
+      :class="[
+        'px-3 py-1.5 cursor-pointer font-mono text-xs transition-colors',
+        !nodes.find(n => n.id === annotCtxNodeId)?.annotation
+          ? 'bg-gray-700 text-white'
+          : 'text-gray-400 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectAnnotation(null)"
+    >none</div>
   </div>
 
   <!-- ── ER relation cardinality context menu ── -->

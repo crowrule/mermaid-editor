@@ -20,6 +20,7 @@ const emit = defineEmits([
   'delete-node', 'delete-edge', 'update-label', 'update-edge-label',
   'add-attribute', 'delete-attribute', 'update-edge-type',
   'add-member', 'update-member', 'delete-member',
+  'update-annotation',
   'update:diagramDirection', 'update:seqAutoNumber',
   'add-activation', 'delete-activation',
   'insert-slot',
@@ -126,6 +127,7 @@ function onUpdateEdgeType(id, edgeType) { emit('update-edge-type', id, edgeType)
 function onAddMember(nodeId, vis, type, name) { emit('add-member', nodeId, vis, type, name) }
 function onUpdateMember(nodeId, index, vis, type, name) { emit('update-member', nodeId, index, vis, type, name) }
 function onDeleteMember(nodeId, index) { emit('delete-member', nodeId, index) }
+function onUpdateAnnotation(nodeId, annotation) { emit('update-annotation', nodeId, annotation) }
 function onInsertSlot(slotIdx, position) {
   seqFlowCount.value += 1
   emit('insert-slot', slotIdx, position)
@@ -316,6 +318,7 @@ function directionClass(d) {
         @add-member="onAddMember"
         @update-member="onUpdateMember"
         @delete-member="onDeleteMember"
+        @update-annotation="onUpdateAnnotation"
         @add-activation="(nodeId, s, e) => emit('add-activation', nodeId, s, e)"
         @delete-activation="(id) => emit('delete-activation', id)"
         @insert-slot="onInsertSlot"
