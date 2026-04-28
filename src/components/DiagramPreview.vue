@@ -50,6 +50,24 @@ async function renderDiagram(code) {
         svgEl.style.maxWidth = 'none'
       }
     }
+    // Class diagram: namespace cluster styling
+    // mermaid inlines style="fill:none !important" on cluster rects,
+    // so we must use setProperty(..., 'important') to win the specificity battle.
+    if (code.trim().startsWith('classDiagram') && svgEl) {
+      svgEl.querySelectorAll('.cluster rect').forEach(rect => {
+        rect.style.setProperty('fill',             '#0d2e22',  'important')
+        rect.style.setProperty('stroke',           '#10b981',  'important')
+        rect.style.setProperty('stroke-width',     '2px',      'important')
+        rect.style.setProperty('stroke-dasharray', '6 3',      'important')
+        rect.style.setProperty('rx',               '6',        'important')
+      })
+      svgEl.querySelectorAll('.cluster-label foreignObject div, .cluster-label text').forEach(el => {
+        el.style.setProperty('color',       '#6ee7b7', 'important')
+        el.style.setProperty('fill',        '#6ee7b7', 'important')
+        el.style.setProperty('font-weight', '700',     'important')
+      })
+    }
+
     if (code.trim().startsWith('sequenceDiagram')) {
       if (svgEl) {
         const SHIFT = 20

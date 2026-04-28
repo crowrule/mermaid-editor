@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { generateCode } from './components/codeGenerator.js'
+import { CLASS_RELATION_LABELS } from './components/classRelations.js'
 import { detectDiagramType, parseDiagram } from './components/diagramParser.js'
 import VisualEditor from './components/VisualEditor.vue'
 import DiagramPreview from './components/DiagramPreview.vue'
@@ -169,6 +170,7 @@ function handleAddNode(x, y, type) {
     y,
   }
   if (type === 'entity') node.attributes = []
+  if (type === 'class') node.members = []
   nodes.value.push(node)
 }
 
@@ -185,6 +187,30 @@ function handleDeleteAttribute(nodeId, index) {
   node.attributes.splice(index, 1)
 }
 
+function handleAddMember(nodeId, vis, type, name) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node) return
+  if (!node.members) node.members = []
+  node.members.push({ visibility: vis, type, name })
+}
+
+function handleUpdateMember(nodeId, index, vis, type, name) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node || !node.members) return
+  node.members[index] = { visibility: vis, type, name }
+}
+
+function handleDeleteMember(nodeId, index) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (!node || !node.members) return
+  node.members.splice(index, 1)
+}
+
+function handleUpdateAnnotation(nodeId, annotation) {
+  const node = nodes.value.find(n => n.id === nodeId)
+  if (node) node.annotation = annotation || undefined
+}
+
 function handleMoveNode(id, x, y) {
   const node = nodes.value.find(n => n.id === id)
   if (node) { node.x = x; node.y = y }
@@ -196,13 +222,15 @@ function handleAddEdge(fromId, toId, edgeType, slot) {
     const exists = edges.value.some(e => e.from === fromId && e.to === toId)
     if (exists) return
   }
-  // ER always defaults to 1:N; other types use the toolbar selection
-  const type = diagramType.value === 'er' ? '||--o{' : (edgeType || 'arrow')
+  // ER always defaults to 1:N; class defaults to assoc; others use toolbar selection
+  const type = diagramType.value === 'er'    ? '||--o{'
+             : diagramType.value === 'class' ? 'assoc'
+             : (edgeType || 'arrow')
   const edge = {
     id: edgeIdCounter++,
     from: fromId,
     to: toId,
-    label: '',
+    label: diagramType.value === 'class' ? (CLASS_RELATION_LABELS[type] ?? '') : '',
     edgeType: type,
   }
   if (slot !== undefined) edge.slot = slot
@@ -265,7 +293,8 @@ function handleDeleteRegion(id) {
 }
 
 function handleAddSubgraph(x, y, width, height) {
-  subgraphs.value.push({ id: subgraphIdCounter++, label: `Group ${subgraphIdCounter - 1}`, x, y, width, height })
+  const labelPrefix = diagramType.value === 'class' ? 'Namespace' : 'Group'
+  subgraphs.value.push({ id: subgraphIdCounter++, label: `${labelPrefix}${subgraphIdCounter - 1}`, x, y, width, height })
 }
 function handleUpdateSubgraph(id, updates) {
   const sg = subgraphs.value.find(s => s.id === id)
@@ -529,6 +558,10 @@ function onLangMenuClickOutside(e) {
         @add-attribute="handleAddAttribute"
         @delete-attribute="handleDeleteAttribute"
         @update-edge-type="handleUpdateEdgeType"
+        @add-member="handleAddMember"
+        @update-member="handleUpdateMember"
+        @delete-member="handleDeleteMember"
+        @update-annotation="handleUpdateAnnotation"
         @update:diagram-direction="diagramDirection = $event"
         @update:seq-auto-number="seqAutoNumber = $event"
         @add-activation="handleAddActivation"

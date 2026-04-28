@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
+import { CLASS_RELATIONS, CLASS_RELATION_LABELS } from './classRelations.js'
 
 const props = defineProps({
   nodes:       { type: Array, required: true },
@@ -20,6 +21,8 @@ const emit = defineEmits([
   'add-node', 'move-node', 'add-edge',
   'delete-node', 'delete-edge', 'update-node-label', 'update-edge-label',
   'add-attribute', 'delete-attribute', 'update-edge-type',
+  'add-member', 'update-member', 'delete-member',
+  'update-annotation',
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
@@ -53,6 +56,15 @@ function parseERSides(edgeType) {
     default:           return { left: '||', right: 'o{' }
   }
 }
+
+// ── class diagram annotation types ───────────────────────────────────────────
+const CLASS_ANNOTATIONS = [
+  { type: 'interface',   label: 'Interface'   },
+  { type: 'abstract',    label: 'Abstract'    },
+  { type: 'service',     label: 'Service'     },
+  { type: 'enumeration', label: 'Enumeration' },
+]
+
 
 // ── region types ─────────────────────────────────────────────────────────────
 const REGION_TYPES = [
@@ -146,7 +158,8 @@ function onDocMousedown(e) {
   dividerCtxMenu.value = null
   regionCtxMenu.value  = null
   if (containerRef.value && !containerRef.value.contains(e.target)) {
-    ctxEdgeId.value = null
+    ctxEdgeId.value      = null
+    annotCtxNodeId.value = null
     slotCtxVisible.value = false
   }
 }
@@ -286,6 +299,30 @@ const newAttrName = ref('')
 const newAttrTypeInputRef = ref(null)
 const newAttrNameInputRef = ref(null)
 
+// inline add member (class diagram)
+const addingMemberNodeId  = ref(null)
+const newMemberIsMethod   = ref(false)
+const newMemberVis        = ref('+')
+const newMemberType       = ref('String')
+const newMemberName       = ref('')
+const newMemberTypeInputRef = ref(null)
+const newMemberNameInputRef = ref(null)
+
+// inline edit member (class diagram)
+const editingMemberNodeId    = ref(null)
+const editingMemberIndex     = ref(null)
+const editMemberIsMethod     = ref(false)
+const editMemberVis          = ref('+')
+const editMemberType         = ref('')
+const editMemberName         = ref('')
+const editMemberTypeInputRef = ref(null)
+const editMemberNameInputRef = ref(null)
+
+// class annotation context menu
+const annotCtxNodeId = ref(null)
+const annotCtxX      = ref(0)
+const annotCtxY      = ref(0)
+
 // inline edit — edge
 const editingEdgeId = ref(null)
 const editEdgeLabel = ref('')
@@ -343,6 +380,26 @@ const editingEdge = computed(() =>
 // If the edge being edited disappears (e.g. deleted), cancel the edit
 watch(editingEdge, (e) => { if (editingEdgeId.value !== null && !e) editingEdgeId.value = null })
 
+// Reset all transient UI state when diagram type changes
+watch(() => props.diagramType, () => {
+  selectedId.value        = null
+  selectedEdgeId.value    = null
+  selectedSgId.value      = null
+  editingNodeId.value     = null
+  editingEdgeId.value     = null
+  editingSgId.value       = null
+  addingAttrNodeId.value   = null
+  addingMemberNodeId.value  = null
+  editingMemberNodeId.value = null
+  editingMemberIndex.value  = null
+  connectSource.value       = null
+  ctxEdgeId.value          = null
+  annotCtxNodeId.value     = null
+  regionMenu.value         = null
+  sgDragStart              = null
+  sgDragPreview.value      = null
+})
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 function svgPoint(e) {
   const rect = svgRef.value.getBoundingClientRect()
@@ -356,6 +413,15 @@ function entityHeight(node) {
 // Geometric center of the full entity box (shifted down by half the attribute area)
 function erEntityCenter(node) {
   return { x: node.x, y: node.y + (node.attributes?.length || 0) * 10 }
+}
+
+// ── class member helpers ──────────────────────────────────────────────────────
+function classNodeHeight(node) {
+  return NODE_H + (node.members?.length || 0) * 20
+}
+// Geometric center of the full class box (shifted down when members exist)
+function classNodeCenter(node) {
+  return { x: node.x, y: node.y + (node.members?.length || 0) * 10 }
 }
 
 // ── empty state hints ─────────────────────────────────────────────────────────
@@ -386,7 +452,33 @@ const emptyHint = computed(() => {
 })
 
 // ── sequence layout helpers ───────────────────────────────────────────────────
-const isSequence = computed(() => props.diagramType === 'sequence')
+const isSequence  = computed(() => props.diagramType === 'sequence')
+// Only flowchart and class diagram support grouping (subgraph / namespace)
+const isGroupable = computed(() => props.diagramType === 'flowchart' || props.diagramType === 'class')
+
+// Visual style for subgraph (flowchart) vs namespace (class diagram)
+const sgStyle = computed(() => {
+  if (props.diagramType === 'class') {
+    return {
+      fill:        'rgba(16,185,129,0.08)',
+      stroke:      '#10b981',
+      badgeFill:   '#065f46',
+      textFill:    '#6ee7b7',
+      editorStyle: 'width:100%;height:100%;background:#022c22;color:#6ee7b7;border:1px solid #10b981;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;',
+      defaultLabel: 'namespace',
+      previewFill:  'rgba(16,185,129,0.07)',
+    }
+  }
+  return {
+    fill:        'rgba(99,102,241,0.1)',
+    stroke:      '#6366f1',
+    badgeFill:   '#4338ca',
+    textFill:    '#c7d2fe',
+    editorStyle: 'width:100%;height:100%;background:#1e1b4b;color:#c7d2fe;border:1px solid #818cf8;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;',
+    defaultLabel: 'subgraph',
+    previewFill:  'rgba(99,102,241,0.07)',
+  }
+})
 
 // Height of the scrollable body SVG
 const seqBodyHeight = computed(() =>
@@ -508,6 +600,17 @@ function edgePath(edge) {
     }
     return `M${x1},${y} L${x2},${y}`
   }
+  // Class: path using geometric center of expanded class box (accounts for members)
+  if (props.diagramType === 'class') {
+    const fc = classNodeCenter(fromNode)
+    const tc = classNodeCenter(toNode)
+    const dx = tc.x - fc.x, dy = tc.y - fc.y
+    const len = Math.sqrt(dx * dx + dy * dy) || 1
+    const ux = dx / len, uy = dy / len
+    const fp = entityBoundaryPoint(fc.x, fc.y,  ux,  uy, NODE_W / 2, classNodeHeight(fromNode) / 2)
+    const tp = entityBoundaryPoint(tc.x, tc.y, -ux, -uy, NODE_W / 2, classNodeHeight(toNode)   / 2)
+    return `M${fp.x},${fp.y} L${tp.x},${tp.y}`
+  }
   // ER: path from entity boundary to entity boundary using geometric center of expanded box
   if (props.diagramType === 'er') {
     const fc = erEntityCenter(fromNode)
@@ -555,6 +658,9 @@ function edgeMidpoint(edge) {
 
 function edgeStrokeDasharray(edgeType) {
   if (props.diagramType === 'er') return 'none'
+  if (props.diagramType === 'class') {
+    return ['dependent', 'realize', 'link-dashed'].includes(edgeType) ? '6 4' : 'none'
+  }
   if (edgeType === 'dotted' || edgeType === '-->>') return '6 4'
   return 'none'
 }
@@ -573,12 +679,33 @@ const ER_END_MARKER = {
 }
 
 function edgeMarkerStart(edge) {
+  if (props.diagramType === 'class') {
+    const sel = selectedEdgeId.value === edge.id
+    switch (edge.edgeType) {
+      case 'inherit':   return sel ? 'url(#cls-inh-sel)'  : 'url(#cls-inh)'
+      case 'compose':   return sel ? 'url(#cls-cmp-sel)'  : 'url(#cls-cmp)'
+      case 'aggregate': return sel ? 'url(#cls-agg-sel)'  : 'url(#cls-agg)'
+      default:          return ''
+    }
+  }
   if (props.diagramType !== 'er') return ''
   const { left } = parseERSides(edge.edgeType)
   return ER_START_MARKER[left] ?? 'url(#er-s-exact-one)'
 }
 
 function edgeMarkerEnd(edge) {
+  if (props.diagramType === 'class') {
+    const sel = selectedEdgeId.value === edge.id
+    switch (edge.edgeType) {
+      case 'inherit':
+      case 'compose':
+      case 'aggregate':
+      case 'link-solid':
+      case 'link-dashed': return ''
+      case 'realize':     return sel ? 'url(#cls-rlz-sel)' : 'url(#cls-rlz)'
+      default:            return sel ? 'url(#arrowHeadSel)' : 'url(#arrowHead)'  // assoc, dependent
+    }
+  }
   if (props.diagramType !== 'er') {
     if (edge.edgeType === 'open') return ''
     if (edge.edgeType === 'cross') return 'url(#arrowCross)'
@@ -597,6 +724,7 @@ function onBgMousedown(e) {
   selectedSgId.value = null
   connectSource.value = null
   addingAttrNodeId.value = null
+  addingMemberNodeId.value = null
   ctxEdgeId.value = null
   slotCtxVisible.value = false
   regionMenu.value = null
@@ -611,8 +739,8 @@ function onBgMousedown(e) {
     return
   }
 
-  // Flowchart select: start subgraph drag-to-draw
-  if (!isSequence.value && props.mode === 'select') {
+  // Flowchart/Class select: start subgraph/namespace drag-to-draw
+  if (isGroupable.value && props.mode === 'select') {
     const pt = svgPoint(e)
     sgDragStart = { x: pt.x, y: pt.y }
     return
@@ -647,6 +775,8 @@ function onNodeDown(e, node) {
   selectedSgId.value = null
   if (addingAttrNodeId.value !== null && addingAttrNodeId.value !== node.id)
     addingAttrNodeId.value = null
+  if (addingMemberNodeId.value !== null && addingMemberNodeId.value !== node.id)
+    addingMemberNodeId.value = null
 
   if (props.mode === 'delete') {
     emit('delete-node', node.id)
@@ -674,11 +804,19 @@ function onNodeDown(e, node) {
 }
 
 function onEdgeContextMenu(e, edge) {
-  if (props.diagramType !== 'er') return
+  if (props.diagramType !== 'er' && props.diagramType !== 'class') return
   const rect = containerRef.value.getBoundingClientRect()
   ctxX.value = e.clientX - rect.left
   ctxY.value = e.clientY - rect.top
   ctxEdgeId.value = edge.id
+}
+
+function selectClassRelation(type) {
+  if (ctxEdgeId.value !== null) {
+    emit('update-edge-type', ctxEdgeId.value, type)
+    emit('update-edge-label', ctxEdgeId.value, CLASS_RELATION_LABELS[type] ?? '')
+  }
+  ctxEdgeId.value = null
 }
 
 function selectFromCard(card) {
@@ -694,6 +832,7 @@ function onEdgeClick(e, edge) {
   e.stopPropagation()
   ctxEdgeId.value = null
   addingAttrNodeId.value = null
+  addingMemberNodeId.value = null
   selectedSgId.value = null
   if (props.mode === 'delete') {
     emit('delete-edge', edge.id)
@@ -722,7 +861,12 @@ function onMouseUp() {
   if (sgDragStart) {
     const prev = sgDragPreview.value
     if (prev && prev.width > 40 && prev.height > 40) {
-      emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
+      // For class diagram: only create namespace if it contains at least one node
+      const hasNode = props.diagramType !== 'class' || props.nodes.some(n =>
+        n.x >= prev.x && n.x <= prev.x + prev.width &&
+        n.y >= prev.y && n.y <= prev.y + prev.height
+      )
+      if (hasNode) emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
     }
     sgDragStart = null
     sgDragPreview.value = null
@@ -773,6 +917,72 @@ function commitAddAttr() {
 function onAttrRowMousedown(e, nodeId, index) {
   // Attribute row always stops propagation to prevent entity select/delete
   if (props.mode === 'delete') emit('delete-attribute', nodeId, index)
+}
+
+function startAddMember(node, e) {
+  e?.stopPropagation()
+  addingMemberNodeId.value = node.id
+  newMemberIsMethod.value  = false
+  newMemberVis.value  = '+'
+  newMemberType.value = 'String'
+  newMemberName.value = 'name'
+  nextTick(() => newMemberTypeInputRef.value?.focus())
+}
+
+function toggleMemberKind() {
+  newMemberIsMethod.value = !newMemberIsMethod.value
+  newMemberType.value = newMemberIsMethod.value ? 'void' : 'String'
+  newMemberName.value = newMemberIsMethod.value ? 'method()' : 'name'
+  nextTick(() => newMemberTypeInputRef.value?.focus())
+}
+
+function commitAddMember() {
+  if (addingMemberNodeId.value !== null) {
+    let name = newMemberName.value.trim()
+    const type = newMemberType.value.trim() || (newMemberIsMethod.value ? 'void' : 'String')
+    const vis  = newMemberVis.value
+    if (name) {
+      // Auto-add () for methods if not already present
+      if (newMemberIsMethod.value && !name.includes('(')) name += '()'
+      emit('add-member', addingMemberNodeId.value, vis, type, name)
+    }
+    addingMemberNodeId.value = null
+  }
+}
+
+function onMemberRowMousedown(e, nodeId, index) {
+  if (props.mode === 'delete') emit('delete-member', nodeId, index)
+}
+
+function startEditMember(node, index, member, e) {
+  e?.stopPropagation()
+  if (props.mode === 'delete' || props.mode === 'connect') return
+  editingMemberNodeId.value = node.id
+  editingMemberIndex.value  = index
+  editMemberIsMethod.value  = member.name.includes('(')
+  editMemberVis.value       = member.visibility
+  editMemberType.value      = member.type
+  editMemberName.value      = member.name
+  nextTick(() => editMemberTypeInputRef.value?.focus())
+}
+
+function commitEditMember() {
+  if (editingMemberNodeId.value !== null && editingMemberIndex.value !== null) {
+    let name = editMemberName.value.trim()
+    const type = editMemberType.value.trim() || (editMemberIsMethod.value ? 'void' : 'String')
+    const vis  = editMemberVis.value
+    if (name) {
+      if (editMemberIsMethod.value && !name.includes('(')) name += '()'
+      emit('update-member', editingMemberNodeId.value, editingMemberIndex.value, vis, type, name)
+    }
+  }
+  editingMemberNodeId.value = null
+  editingMemberIndex.value  = null
+}
+
+function toggleEditMemberKind() {
+  editMemberIsMethod.value = !editMemberIsMethod.value
+  nextTick(() => editMemberTypeInputRef.value?.focus())
 }
 
 function commitEdgeEdit() {
@@ -1079,13 +1289,29 @@ function commitSgLabel() {
   editingSgId.value = null
 }
 
+// ── class node annotation context menu ───────────────────────────────────────
+function onClassNodeContextMenu(e, node) {
+  if (props.diagramType !== 'class') return
+  const rect = containerRef.value.getBoundingClientRect()
+  annotCtxX.value      = e.clientX - rect.left
+  annotCtxY.value      = e.clientY - rect.top
+  annotCtxNodeId.value = node.id
+}
+
+function selectAnnotation(annotation) {
+  if (annotCtxNodeId.value !== null)
+    emit('update-annotation', annotCtxNodeId.value, annotation)
+  annotCtxNodeId.value = null
+}
+
 // ── keyboard delete ───────────────────────────────────────────────────────────
 function onKeyDown(e) {
   if (e.key === 'Delete' || e.key === 'Backspace') {
     if (editingNodeId.value !== null)   return
     if (editingEdgeId.value !== null)   return
-    if (addingAttrNodeId.value !== null) return
-    if (editingSgId.value !== null)     return
+    if (addingAttrNodeId.value !== null)  return
+    if (addingMemberNodeId.value !== null) return
+    if (editingSgId.value !== null)       return
     if (selectedSgId.value !== null) {
       emit('delete-subgraph', selectedSgId.value)
       selectedSgId.value = null
@@ -1111,10 +1337,14 @@ function onKeyDown(e) {
     draggingDivRegId.value    = null
     divDragPreviewSlot.value  = null
     dividerCtxMenu.value      = null
-    addingAttrNodeId.value    = null
-    ctxEdgeId.value           = null
-    regionMenu.value          = null
-    resizingRegionId.value    = null
+    addingAttrNodeId.value     = null
+    addingMemberNodeId.value   = null
+    editingMemberNodeId.value  = null
+    editingMemberIndex.value   = null
+    ctxEdgeId.value            = null
+    annotCtxNodeId.value       = null
+    regionMenu.value           = null
+    resizingRegionId.value     = null
     resizePreviewEndSlot.value = null
   }
 }
@@ -1479,6 +1709,36 @@ function onKeyDown(e) {
         <line x1="10" y1="0" x2="0" y2="10" stroke="#f87171" stroke-width="2"/>
       </marker>
 
+      <!-- ── Class diagram relation markers ── -->
+      <!-- Hollow triangle START — inherit (◁ at fromNode/parent, tip touches boundary) -->
+      <marker id="cls-inh" markerWidth="15" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 14,0 L 14,12 Z" fill="#030712" stroke="#818cf8" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <marker id="cls-inh-sel" markerWidth="15" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 14,0 L 14,12 Z" fill="#030712" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <!-- Hollow triangle END — realize (▷ at toNode/interface, tip touches boundary) -->
+      <marker id="cls-rlz" markerWidth="15" markerHeight="12" refX="14" refY="6" orient="auto">
+        <path d="M 14,6 L 0,0 L 0,12 Z" fill="#030712" stroke="#818cf8" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <marker id="cls-rlz-sel" markerWidth="15" markerHeight="12" refX="14" refY="6" orient="auto">
+        <path d="M 14,6 L 0,0 L 0,12 Z" fill="#030712" stroke="#f59e0b" stroke-width="1.5" stroke-linejoin="round"/>
+      </marker>
+      <!-- Filled diamond START — compose (◆ at fromNode/whole) -->
+      <marker id="cls-cmp" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#818cf8" stroke="#818cf8" stroke-width="1"/>
+      </marker>
+      <marker id="cls-cmp-sel" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#f59e0b" stroke="#f59e0b" stroke-width="1"/>
+      </marker>
+      <!-- Hollow diamond START — aggregate (◇ at fromNode/whole) -->
+      <marker id="cls-agg" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#030712" stroke="#818cf8" stroke-width="1.5"/>
+      </marker>
+      <marker id="cls-agg-sel" markerWidth="18" markerHeight="12" refX="0" refY="6" orient="auto">
+        <path d="M 0,6 L 8,1 L 16,6 L 8,11 Z" fill="#030712" stroke="#f59e0b" stroke-width="1.5"/>
+      </marker>
+
       <!-- ER cardinality markers — START (entity at low-x, path goes right) -->
       <!-- || exactly one: two bars -->
       <marker id="er-s-exact-one" markerWidth="9" markerHeight="14" refX="1" refY="7" orient="auto">
@@ -1531,14 +1791,14 @@ function onKeyDown(e) {
       @mousedown="onBgMousedown"
     />
 
-    <!-- ── subgraphs (rendered behind edges and nodes) ── -->
+    <!-- ── subgraphs / namespaces (rendered behind edges and nodes) ── -->
     <g v-for="sg in subgraphs" :key="'sg-' + sg.id"
        @mousedown.stop="onSgMousedown($event, sg)"
        @dblclick.stop="startSgLabelEdit(sg)">
       <rect
         :x="sg.x" :y="sg.y" :width="sg.width" :height="sg.height"
-        fill="rgba(99,102,241,0.1)"
-        :stroke="selectedSgId === sg.id ? '#f59e0b' : '#6366f1'"
+        :fill="sgStyle.fill"
+        :stroke="selectedSgId === sg.id ? '#f59e0b' : sgStyle.stroke"
         :stroke-width="selectedSgId === sg.id ? 2 : 1.5"
         stroke-dasharray="6 4"
         rx="6"
@@ -1547,22 +1807,22 @@ function onKeyDown(e) {
       <!-- label badge -->
       <rect v-if="editingSgId !== sg.id"
         :x="sg.x + 6" :y="sg.y + 4"
-        :width="(sg.label || 'subgraph').length * 7 + 14" height="18"
-        rx="3" fill="#4338ca" fill-opacity="0.85"
+        :width="(sg.label || sgStyle.defaultLabel).length * 7 + 14" height="18"
+        rx="3" :fill="sgStyle.badgeFill" fill-opacity="0.85"
       />
       <text v-if="editingSgId !== sg.id"
         :x="sg.x + 13" :y="sg.y + 16"
-        fill="#c7d2fe" font-size="11" font-weight="bold" pointer-events="none"
-      >{{ sg.label || 'subgraph' }}</text>
+        :fill="sgStyle.textFill" font-size="11" font-weight="bold" pointer-events="none"
+      >{{ sg.label || sgStyle.defaultLabel }}</text>
       <!-- inline label editor -->
       <foreignObject v-if="editingSgId === sg.id"
-        :x="sg.x + 6" :y="sg.y + 4" width="160" height="20">
+        :x="sg.x + 6" :y="sg.y + 4" width="160" height="28">
         <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%">
           <input ref="editSgLabelRef" v-model="editSgLabel"
                  @keydown.enter.stop="commitSgLabel"
                  @keydown.escape.stop="editingSgId = null"
                  @blur="commitSgLabel"
-                 style="width:100%;height:100%;background:#1e1b4b;color:#c7d2fe;border:1px solid #818cf8;font-size:11px;padding:1px 4px;box-sizing:border-box;outline:none;border-radius:2px;" />
+                 :style="sgStyle.editorStyle" />
         </div>
       </foreignObject>
     </g>
@@ -1571,8 +1831,8 @@ function onKeyDown(e) {
     <rect v-if="sgDragPreview"
       :x="sgDragPreview.x" :y="sgDragPreview.y"
       :width="sgDragPreview.width" :height="sgDragPreview.height"
-      fill="rgba(99,102,241,0.07)"
-      stroke="#6366f1" stroke-width="1.5" stroke-dasharray="6 4"
+      :fill="sgStyle.previewFill"
+      :stroke="sgStyle.stroke" stroke-width="1.5" stroke-dasharray="6 4"
       rx="6" pointer-events="none"
     />
 
@@ -1614,9 +1874,10 @@ function onKeyDown(e) {
       :class="['cursor-pointer select-none', mode === 'delete' ? 'cursor-not-allowed' : '']"
       @mousedown.stop="onNodeDown($event, node)"
       @dblclick.stop="startEdit(node)"
+      @contextmenu.prevent.stop="onClassNodeContextMenu($event, node)"
     >
-      <!-- process / participant / class → plain rect -->
-      <template v-if="['process','participant','class'].includes(node.type)">
+      <!-- process / participant → plain rect -->
+      <template v-if="['process','participant'].includes(node.type)">
         <rect
           :x="effectiveX(node) - NODE_W / 2"
           :y="effectiveY(node) - NODE_H / 2"
@@ -1625,6 +1886,108 @@ function onKeyDown(e) {
           :stroke="strokeColor(node)"
           stroke-width="2"
         />
+      </template>
+
+      <!-- class → expandable rect with member rows -->
+      <template v-if="node.type === 'class'">
+        <rect
+          :x="effectiveX(node) - NODE_W / 2"
+          :y="effectiveY(node) - NODE_H / 2"
+          :width="NODE_W" :height="classNodeHeight(node)"
+          :fill="nodeColor('class').fill"
+          :stroke="strokeColor(node)"
+          stroke-width="2"
+        />
+        <!-- annotation «interface» etc. -->
+        <text
+          v-if="node.annotation && editingNodeId !== node.id"
+          :x="effectiveX(node)"
+          :y="effectiveY(node) - 9"
+          fill="#a5b4fc" font-size="9" font-style="italic"
+          text-anchor="middle" dominant-baseline="middle" pointer-events="none"
+        >«{{ node.annotation }}»</text>
+        <!-- header/body divider -->
+        <line
+          v-if="node.members?.length"
+          :x1="effectiveX(node) - NODE_W / 2" :y1="effectiveY(node) + NODE_H / 2"
+          :x2="effectiveX(node) + NODE_W / 2" :y2="effectiveY(node) + NODE_H / 2"
+          :stroke="nodeColor('class').stroke" stroke-width="1" opacity="0.5"
+        />
+        <!-- member rows -->
+        <g
+          v-for="(member, i) in (node.members || [])"
+          :key="'member-' + i"
+          @mousedown.stop="onMemberRowMousedown($event, node.id, i)"
+          @dblclick.stop="startEditMember(node, i, member, $event)"
+          style="cursor:default"
+        >
+          <rect
+            :x="effectiveX(node) - NODE_W / 2"
+            :y="effectiveY(node) + NODE_H / 2 + i * 20"
+            :width="NODE_W" height="20"
+            :fill="mode === 'delete' ? 'rgba(248,113,113,0.12)' : 'transparent'"
+            style="cursor:pointer"
+          />
+          <!-- hide row text while editing this member -->
+          <template v-if="editingMemberNodeId === node.id && editingMemberIndex === i" />
+          <template v-else>
+          <!-- visibility -->
+          <text
+            :x="effectiveX(node) - NODE_W / 2 + 6"
+            :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+            fill="#818cf8" font-size="10" text-anchor="start" pointer-events="none"
+          >{{ member.visibility }}</text>
+          <!-- field: vis Type name  /  method: vis name() ReturnType -->
+          <template v-if="member.name.includes('(')">
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#e2e8f0" font-size="10" text-anchor="start" pointer-events="none"
+            >{{ member.name }}</text>
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18 + member.name.length * 6.5"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#a5b4fc" font-size="10" text-anchor="start" pointer-events="none"
+            > {{ member.type }}</text>
+          </template>
+          <template v-else>
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#a5b4fc" font-size="10" text-anchor="start" pointer-events="none"
+            >{{ member.type }}</text>
+            <text
+              :x="effectiveX(node) - NODE_W / 2 + 18 + member.type.length * 6.5"
+              :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+              fill="#e2e8f0" font-size="10" text-anchor="start" pointer-events="none"
+            > {{ member.name }}</text>
+          </template>
+          <text
+            v-if="mode === 'delete'"
+            :x="effectiveX(node) + NODE_W / 2 - 8"
+            :y="effectiveY(node) + NODE_H / 2 + 14 + i * 20"
+            fill="#f87171" font-size="11" text-anchor="middle" pointer-events="none"
+          >×</text>
+          </template><!-- /editing-hide -->
+        </g>
+        <!-- "+ member" button (select mode, selected node, not currently adding) -->
+        <g
+          v-if="mode === 'select' && selectedId === node.id && addingMemberNodeId !== node.id"
+          @mousedown.stop="startAddMember(node, $event)"
+          style="cursor:pointer"
+        >
+          <rect
+            :x="effectiveX(node) - 24"
+            :y="effectiveY(node) - NODE_H / 2 + classNodeHeight(node) + 3"
+            width="48" height="14" rx="2"
+            fill="#3730a3" opacity="0.85"
+          />
+          <text
+            :x="effectiveX(node)"
+            :y="effectiveY(node) - NODE_H / 2 + classNodeHeight(node) + 13"
+            fill="#c7d2fe" font-size="9" text-anchor="middle" pointer-events="none"
+          >+ member</text>
+        </g>
       </template>
 
       <!-- entity → expandable rect with attribute rows -->
@@ -1842,7 +2205,7 @@ function onKeyDown(e) {
       <text
         v-if="editingNodeId !== node.id"
         :x="effectiveX(node)"
-        :y="effectiveY(node) + (node.type === 'actor' ? 38 : 5)"
+        :y="effectiveY(node) + (node.type === 'actor' ? 38 : (node.type === 'class' && node.annotation ? 10 : 5))"
         fill="#f3f4f6"
         font-size="13"
         text-anchor="middle"
@@ -1903,6 +2266,100 @@ function onKeyDown(e) {
       </div>
     </foreignObject>
 
+    <!-- ── inline member add form (class diagram) ── -->
+    <foreignObject
+      v-if="addingMemberNodeId !== null"
+      :x="(() => { const n = nodes.find(n => n.id === addingMemberNodeId); return n ? effectiveX(n) - NODE_W / 2 : 0 })()"
+      :y="(() => { const n = nodes.find(n => n.id === addingMemberNodeId); return n ? effectiveY(n) - NODE_H / 2 + classNodeHeight(n) + 20 : 0 })()"
+      width="266" height="28"
+    >
+      <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;gap:3px;height:100%">
+        <!-- visibility -->
+        <select
+          v-model="newMemberVis"
+          style="width:36px;background:#0f172a;color:#818cf8;border:1px solid #4f46e5;font-size:11px;padding:2px 2px;outline:none;box-sizing:border-box;"
+        >
+          <option value="+">+</option>
+          <option value="-">-</option>
+          <option value="#">#</option>
+          <option value="~">~</option>
+        </select>
+        <!-- field / method toggle -->
+        <button
+          @mousedown.prevent.stop="toggleMemberKind"
+          :style="`background:${newMemberIsMethod ? '#1e3a5f' : '#14532d'};color:${newMemberIsMethod ? '#93c5fd' : '#86efac'};border:1px solid ${newMemberIsMethod ? '#3b82f6' : '#22c55e'};font-size:10px;padding:2px 5px;cursor:pointer;border-radius:2px;white-space:nowrap;`"
+        >{{ newMemberIsMethod ? 'M' : 'F' }}</button>
+        <!-- type / return-type -->
+        <input
+          ref="newMemberTypeInputRef"
+          v-model="newMemberType"
+          :placeholder="newMemberIsMethod ? 'ret type' : 'type'"
+          @keydown.enter.stop="commitAddMember"
+          @keydown.tab.prevent="newMemberNameInputRef?.focus()"
+          @keydown.escape.stop="addingMemberNodeId = null"
+          style="width:60px;background:#0f172a;color:#a5b4fc;border:1px solid #4f46e5;font-size:11px;padding:2px 4px;outline:none;box-sizing:border-box;"
+        />
+        <!-- name -->
+        <input
+          ref="newMemberNameInputRef"
+          v-model="newMemberName"
+          :placeholder="newMemberIsMethod ? 'name(params)' : 'name'"
+          @keydown.enter.stop="commitAddMember"
+          @keydown.escape.stop="addingMemberNodeId = null"
+          style="width:96px;background:#0f172a;color:#e2e8f0;border:1px solid #4f46e5;font-size:11px;padding:2px 4px;outline:none;box-sizing:border-box;"
+        />
+        <button
+          @mousedown.prevent.stop="commitAddMember"
+          style="background:#3730a3;color:#c7d2fe;border:none;font-size:11px;padding:2px 7px;cursor:pointer;border-radius:2px;"
+        >✓</button>
+      </div>
+    </foreignObject>
+
+    <!-- ── inline member edit form (class diagram) ── -->
+    <foreignObject
+      v-if="editingMemberNodeId !== null"
+      :x="(() => { const n = nodes.find(n => n.id === editingMemberNodeId); return n ? effectiveX(n) - NODE_W / 2 : 0 })()"
+      :y="(() => { const n = nodes.find(n => n.id === editingMemberNodeId); return n ? effectiveY(n) + NODE_H / 2 + editingMemberIndex * 20 : 0 })()"
+      width="266" height="20"
+    >
+      <div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;gap:3px;height:100%;align-items:center">
+        <select
+          v-model="editMemberVis"
+          style="width:36px;height:18px;background:#0f172a;color:#818cf8;border:1px solid #f59e0b;font-size:11px;padding:0 2px;outline:none;box-sizing:border-box;"
+        >
+          <option value="+">+</option>
+          <option value="-">-</option>
+          <option value="#">#</option>
+          <option value="~">~</option>
+        </select>
+        <button
+          @mousedown.prevent.stop="toggleEditMemberKind"
+          :style="`height:18px;background:${editMemberIsMethod ? '#1e3a5f' : '#14532d'};color:${editMemberIsMethod ? '#93c5fd' : '#86efac'};border:1px solid ${editMemberIsMethod ? '#3b82f6' : '#22c55e'};font-size:10px;padding:0 5px;cursor:pointer;border-radius:2px;`"
+        >{{ editMemberIsMethod ? 'M' : 'F' }}</button>
+        <input
+          ref="editMemberTypeInputRef"
+          v-model="editMemberType"
+          :placeholder="editMemberIsMethod ? 'ret type' : 'type'"
+          @keydown.enter.stop="commitEditMember"
+          @keydown.tab.prevent="editMemberNameInputRef?.focus()"
+          @keydown.escape.stop="editingMemberNodeId = null; editingMemberIndex = null"
+          style="width:60px;height:18px;background:#0f172a;color:#a5b4fc;border:1px solid #f59e0b;font-size:11px;padding:0 4px;outline:none;box-sizing:border-box;"
+        />
+        <input
+          ref="editMemberNameInputRef"
+          v-model="editMemberName"
+          :placeholder="editMemberIsMethod ? 'name(params)' : 'name'"
+          @keydown.enter.stop="commitEditMember"
+          @keydown.escape.stop="editingMemberNodeId = null; editingMemberIndex = null"
+          style="width:96px;height:18px;background:#0f172a;color:#e2e8f0;border:1px solid #f59e0b;font-size:11px;padding:0 4px;outline:none;box-sizing:border-box;"
+        />
+        <button
+          @mousedown.prevent.stop="commitEditMember"
+          style="height:18px;background:#78350f;color:#fde68a;border:none;font-size:11px;padding:0 7px;cursor:pointer;border-radius:2px;"
+        >✓</button>
+      </div>
+    </foreignObject>
+
     <!-- ── inline edge label editor ── -->
     <foreignObject
       v-if="editingEdge"
@@ -1935,9 +2392,62 @@ function onKeyDown(e) {
     >{{ emptyHint }}</text>
   </svg>
 
+  <!-- ── Class relation type context menu ── -->
+  <div
+    v-if="ctxEdgeId !== null && diagramType === 'class'"
+    :style="{ position: 'absolute', left: ctxX + 'px', top: ctxY + 'px', zIndex: 50 }"
+    class="bg-gray-800 border border-gray-600 rounded shadow-xl py-1 w-52 text-sm"
+    @mousedown.stop
+  >
+    <div class="px-3 py-1 text-xs text-indigo-400 font-semibold tracking-wide">Relation Type</div>
+    <div
+      v-for="rel in CLASS_RELATIONS"
+      :key="rel.type"
+      :class="[
+        'flex items-center gap-2 px-3 py-1.5 cursor-pointer transition-colors',
+        ctxEdge?.edgeType === rel.type ? 'bg-indigo-700 text-white' : 'text-gray-200 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectClassRelation(rel.type)"
+    >
+      <code class="w-10 text-center font-mono text-xs opacity-75 shrink-0">{{ rel.symbol }}</code>
+      <span>{{ rel.label }}</span>
+    </div>
+  </div>
+
+  <!-- ── Class node annotation context menu ── -->
+  <div
+    v-if="annotCtxNodeId !== null && diagramType === 'class'"
+    :style="{ position: 'absolute', left: annotCtxX + 'px', top: annotCtxY + 'px', zIndex: 50 }"
+    class="bg-gray-800 border border-gray-600 rounded shadow-xl py-1 w-44 text-sm"
+    @mousedown.stop
+  >
+    <div class="px-3 py-1 text-xs text-indigo-400 font-semibold tracking-wide">Annotation</div>
+    <div
+      v-for="ann in CLASS_ANNOTATIONS"
+      :key="ann.type"
+      :class="[
+        'px-3 py-1.5 cursor-pointer font-mono text-xs transition-colors',
+        nodes.find(n => n.id === annotCtxNodeId)?.annotation === ann.type
+          ? 'bg-indigo-700 text-white'
+          : 'text-gray-200 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectAnnotation(ann.type)"
+    >&lt;&lt;{{ ann.type }}&gt;&gt;</div>
+    <div class="my-1 border-t border-gray-700" />
+    <div
+      :class="[
+        'px-3 py-1.5 cursor-pointer font-mono text-xs transition-colors',
+        !nodes.find(n => n.id === annotCtxNodeId)?.annotation
+          ? 'bg-gray-700 text-white'
+          : 'text-gray-400 hover:bg-gray-700'
+      ]"
+      @mousedown.stop="selectAnnotation(null)"
+    >none</div>
+  </div>
+
   <!-- ── ER relation cardinality context menu ── -->
   <div
-    v-if="ctxEdgeId !== null"
+    v-if="ctxEdgeId !== null && diagramType === 'er'"
     :style="{ position: 'absolute', left: ctxX + 'px', top: ctxY + 'px', zIndex: 50 }"
     class="bg-gray-800 border border-gray-600 rounded shadow-xl py-1 w-52 text-sm"
     @mousedown.stop
