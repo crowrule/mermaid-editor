@@ -1,5 +1,5 @@
-const fs = require("fs");
-const OpenAI = require("openai");
+import fs from "fs";
+import OpenAI from "openai";
 
 const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -7,10 +7,7 @@ const client = new OpenAI({
 
 const diff = fs.readFileSync("pr.diff", "utf8");
 
-async function main() {
-  const response = await client.responses.create({
-    model: "gpt-4.1-mini",
-    input: `
+const prompt = `
 You are a senior software engineer reviewing a GitHub Pull Request.
 
 Review the following diff.
@@ -28,10 +25,11 @@ Do not nitpick formatting unless important.
 
 Diff:
 ${diff.slice(0, 60000)}
-`
-  });
+`;
 
-  fs.writeFileSync("review.md", response.output_text);
-}
+const response = await client.responses.create({
+  model: "gpt-4.1-mini",
+  input: prompt,
+});
 
-main();
+fs.writeFileSync("review.md", response.output_text);
