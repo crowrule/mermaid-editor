@@ -23,6 +23,7 @@ const emit = defineEmits([
   'add-attribute', 'delete-attribute', 'update-edge-type',
   'add-member', 'update-member', 'delete-member',
   'update-annotation',
+  'update-mode',
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
@@ -792,6 +793,16 @@ function onNodeDown(e, node) {
     }
     return
   }
+  // Class diagram: clicking a node in Add mode switches to Select mode
+  if (props.diagramType === 'class' && props.mode === 'add') {
+    emit('update-mode', 'select')
+    selectedId.value = node.id
+    const pt = svgPoint(e)
+    dragging = node
+    dragOffX = pt.x - node.x
+    dragOffY = pt.y - node.y
+    return
+  }
   if (props.mode === 'select') {
     selectedId.value = node.id
     if (!isSequence.value) {
@@ -867,6 +878,9 @@ function onMouseUp() {
         n.y >= prev.y && n.y <= prev.y + prev.height
       )
       if (hasNode) emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
+    } else if (props.diagramType === 'class' && props.mode === 'select') {
+      // Class diagram: click on empty canvas (no real drag) → switch back to Add mode
+      emit('update-mode', 'add')
     }
     sgDragStart = null
     sgDragPreview.value = null

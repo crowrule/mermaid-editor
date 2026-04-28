@@ -30,6 +30,12 @@ const emit = defineEmits([
 ])
 
 const mode = ref('add')
+
+// Class diagram: canvas-driven mode switching (node click → select, bg click → add)
+function onUpdateMode(newMode) {
+  mode.value = newMode
+}
+
 const selectedNodeType = ref('process')
 const selectedEdgeType = ref('arrow')
 const seqFlowCount   = ref(10)
@@ -328,6 +334,7 @@ function directionClass(d) {
         @add-subgraph="onAddSubgraph"
         @update-subgraph="onUpdateSubgraph"
         @delete-subgraph="onDeleteSubgraph"
+        @update-mode="onUpdateMode"
       />
     </div>
   </div>
