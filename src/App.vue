@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { generateCode } from './components/codeGenerator.js'
+import { CLASS_RELATION_LABELS } from './components/classRelations.js'
 import { detectDiagramType, parseDiagram } from './components/diagramParser.js'
 import VisualEditor from './components/VisualEditor.vue'
 import DiagramPreview from './components/DiagramPreview.vue'
@@ -225,16 +226,6 @@ function handleAddEdge(fromId, toId, edgeType, slot) {
   const type = diagramType.value === 'er'    ? '||--o{'
              : diagramType.value === 'class' ? 'assoc'
              : (edgeType || 'arrow')
-  const CLASS_RELATION_LABELS = {
-    'inherit':     'Inheritance',
-    'realize':     'Realization',
-    'compose':     'Composition',
-    'aggregate':   'Aggregation',
-    'assoc':       'Association',
-    'dependent':   'Dependency',
-    'link-solid':  'Link (Solid)',
-    'link-dashed': 'Link (Dashed)',
-  }
   const edge = {
     id: edgeIdCounter++,
     from: fromId,

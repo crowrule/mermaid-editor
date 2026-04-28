@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue'
+import { CLASS_RELATIONS, CLASS_RELATION_LABELS } from './classRelations.js'
 
 const props = defineProps({
   nodes:       { type: Array, required: true },
@@ -64,17 +65,6 @@ const CLASS_ANNOTATIONS = [
   { type: 'enumeration', label: 'Enumeration' },
 ]
 
-// ── class diagram relation types ──────────────────────────────────────────────
-const CLASS_RELATIONS = [
-  { type: 'inherit',     label: 'Inheritance',   symbol: '<|--' },
-  { type: 'realize',     label: 'Realization',   symbol: '..|>' },
-  { type: 'compose',     label: 'Composition',   symbol: '*--'  },
-  { type: 'aggregate',   label: 'Aggregation',   symbol: 'o--'  },
-  { type: 'assoc',       label: 'Association',   symbol: '-->'  },
-  { type: 'dependent',   label: 'Dependency',    symbol: '..>'  },
-  { type: 'link-solid',  label: 'Link (Solid)',  symbol: '--'   },
-  { type: 'link-dashed', label: 'Link (Dashed)', symbol: '..'   },
-]
 
 // ── region types ─────────────────────────────────────────────────────────────
 const REGION_TYPES = [
@@ -819,17 +809,6 @@ function onEdgeContextMenu(e, edge) {
   ctxX.value = e.clientX - rect.left
   ctxY.value = e.clientY - rect.top
   ctxEdgeId.value = edge.id
-}
-
-const CLASS_RELATION_LABELS = {
-  'inherit':     'Inheritance',
-  'realize':     'Realization',
-  'compose':     'Composition',
-  'aggregate':   'Aggregation',
-  'assoc':       'Association',
-  'dependent':   'Dependency',
-  'link-solid':  'Link (Solid)',
-  'link-dashed': 'Link (Dashed)',
 }
 
 function selectClassRelation(type) {
