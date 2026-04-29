@@ -747,6 +747,12 @@ function onBgMousedown(e) {
     return
   }
 
+  // ER select: background click switches back to Add mode
+  if (props.diagramType === 'er' && props.mode === 'select') {
+    emit('update-mode', 'add')
+    return
+  }
+
   // Sequence: add-node is handled by the sticky header; body clicks only clear state
   if (props.mode === 'add' && !isSequence.value) {
     const pt = svgPoint(e)
@@ -793,8 +799,8 @@ function onNodeDown(e, node) {
     }
     return
   }
-  // Class diagram: clicking a node in Add mode switches to Select mode
-  if (props.diagramType === 'class' && props.mode === 'add') {
+  // Class/ER diagram: clicking a node in Add mode switches to Select mode
+  if ((props.diagramType === 'class' || props.diagramType === 'er') && props.mode === 'add') {
     emit('update-mode', 'select')
     selectedId.value = node.id
     const pt = svgPoint(e)
