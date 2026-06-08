@@ -765,6 +765,7 @@ function onBgMousedown(e) {
 
 // Called when clicking the sticky sequence header background
 function onHeaderMousedown(e) {
+  if (editingNodeId.value !== null) return
   selectedId.value = null
   selectedEdgeId.value = null
   connectSource.value = null
