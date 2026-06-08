@@ -1457,6 +1457,9 @@ function onKeyDown(e) {
           <marker id="arrowHead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
             <polygon points="0 0, 10 3.5, 0 7" fill="#60a5fa" />
           </marker>
+          <marker id="arrowHeadSel" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" />
+          </marker>
           <marker id="arrowCross" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
             <line x1="0" y1="0" x2="10" y2="10" stroke="#f87171" stroke-width="2"/>
             <line x1="10" y1="0" x2="0" y2="10" stroke="#f87171" stroke-width="2"/>
