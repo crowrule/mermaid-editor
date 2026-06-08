@@ -1,4 +1,6 @@
 <script setup>
+import { trackEvent } from '../analytics.js'
+
 const props = defineProps({
   previewRef: {
     type: Object,
@@ -24,6 +26,7 @@ function triggerDownload(url, filename) {
 function exportSvg() {
   const svgEl = getSvgElement()
   if (!svgEl) return
+  trackEvent('export', { format: 'svg' })
   const svgStr = new XMLSerializer().serializeToString(svgEl)
   const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' })
   triggerDownload(URL.createObjectURL(blob), 'diagram.svg')
@@ -59,6 +62,7 @@ async function exportPng() {
   ctx.scale(scale, scale)
   ctx.drawImage(img, 0, 0, width, height)
 
+  trackEvent('export', { format: 'png' })
   triggerDownload(canvas.toDataURL('image/png'), 'diagram.png')
 }
 </script>

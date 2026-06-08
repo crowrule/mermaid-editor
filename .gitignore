@@ -23,5 +23,13 @@ dist-ssr
 *.sln
 *.sw?
 
+# AI
+.chatgpt
+.claude
+
+# Temporary
+example/
+
 # Product
 
+.env.local
