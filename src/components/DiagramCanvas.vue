@@ -1403,6 +1403,10 @@ function onKeyDown(e) {
                   :fill="nodeColor('participant').fill" :stroke="strokeColor(node)" stroke-width="2" />
           </template>
           <template v-else-if="node.type === 'actor'">
+            <!-- invisible hit area covering head→legs+label -->
+            <rect :x="effectiveX(node) - NODE_W / 2" :y="effectiveY(node) - 28"
+                  :width="NODE_W" height="72"
+                  fill="transparent" stroke="none" />
             <circle :cx="effectiveX(node)" :cy="effectiveY(node) - 16" r="10"
                     :fill="nodeColor('actor').fill" :stroke="strokeColor(node)" stroke-width="2" />
             <line :x1="effectiveX(node)" :y1="effectiveY(node) - 6"
