@@ -609,7 +609,7 @@ function onLangMenuClickOutside(e) {
           <!-- tab-contextual action buttons -->
           <div class="ml-auto flex items-center gap-2 pr-3">
             <template v-if="rightTab === 'preview'">
-              <ToolBar :preview-ref="previewRef" />
+              <ToolBar :preview-ref="previewRef" :code="diagramCode" />
             </template>
             <template v-else>
               <button
