@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { generateCode } from './components/codeGenerator.js'
 import { CLASS_RELATION_LABELS } from './components/classRelations.js'
+import { initGA, trackEvent } from './analytics.js'
 import { detectDiagramType, parseDiagram } from './components/diagramParser.js'
 import VisualEditor from './components/VisualEditor.vue'
 import DiagramPreview from './components/DiagramPreview.vue'
@@ -59,6 +60,7 @@ const pendingDiagramType = ref(null)
 function handleDiagramTypeChange(e) {
   const newType = e.target.value
   if (newType === diagramType.value) return
+  trackEvent('diagram_type_change', { diagram_type: newType })
   if (nodes.value.length > 0) {
     pendingDiagramType.value = newType
   } else {
@@ -110,6 +112,7 @@ onMounted(() => {
   window.addEventListener('mousemove', onGlobalMousemove)
   window.addEventListener('mouseup', onGlobalMouseup)
   document.addEventListener('mousedown', onLangMenuClickOutside)
+  initGA()
 })
 onUnmounted(() => {
   window.removeEventListener('mousemove', onGlobalMousemove)
@@ -172,6 +175,7 @@ function handleAddNode(x, y, type) {
   if (type === 'entity') node.attributes = []
   if (type === 'class') node.members = []
   nodes.value.push(node)
+  trackEvent('node_add', { diagram_type: diagramType.value, node_type: type })
 }
 
 function handleAddAttribute(nodeId, dataType, name) {
@@ -318,6 +322,7 @@ function handleCodeChange(code) {
 
 // ── save / open ───────────────────────────────────────────────────────────────
 async function saveCode() {
+  trackEvent('file_save', { diagram_type: diagramType.value })
   if (window.showSaveFilePicker) {
     try {
       const handle = await window.showSaveFilePicker({
@@ -375,6 +380,7 @@ async function openCode() {
 
   const parsed = parseDiagram(text)
   if (!parsed) { showUnsupportedPopup.value = true; return }
+  trackEvent('file_open', { diagram_type: parsed.type })
 
   // Load into state — suppress watchers during the batch update
   loadingFile = true

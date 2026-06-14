@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { trackEvent } from '../analytics.js'
 
 const props = defineProps({
   previewRef: { type: Object, default: null },
@@ -63,6 +64,7 @@ async function exportSvg() {
   const result = await promptFilename('diagram.svg')
   if (result === null) return
   const { name, light } = result
+  trackEvent('export', { format: 'svg' })
 
   let svgStr
   if (light) {
@@ -113,6 +115,7 @@ async function exportPng() {
   ctx.scale(scale, scale)
   ctx.drawImage(img, 0, 0, width, height)
 
+  trackEvent('export', { format: 'png' })
   triggerDownload(canvas.toDataURL('image/png'), `${name}.png`)
 }
 </script>
