@@ -26,7 +26,6 @@ const emit = defineEmits([
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
   'add-subgraph', 'update-subgraph', 'delete-subgraph',
-  'clear',
 ])
 
 const mode = ref('add')
@@ -285,14 +284,8 @@ function directionClass(d) {
           <button :class="['px-2.5 py-1 text-xs rounded transition-colors', modeClass('delete')]"  @click="mode = 'delete'">✕ Delete</button>
         </div>
 
-        <!-- clear button -->
-        <button
-          @click="emit('clear')"
-          class="ml-auto px-2.5 py-1 text-xs rounded bg-red-900/60 text-red-300 hover:bg-red-800 transition-colors whitespace-nowrap"
-        >✕ Clear</button>
-
         <!-- hint -->
-        <span class="text-xs text-gray-500 whitespace-nowrap">{{ hint }}</span>
+        <span class="ml-auto text-xs text-gray-500 whitespace-nowrap">{{ hint }}</span>
       </div>
     </div>
 
