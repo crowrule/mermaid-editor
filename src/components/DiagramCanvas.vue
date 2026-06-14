@@ -23,6 +23,7 @@ const emit = defineEmits([
   'add-attribute', 'delete-attribute', 'update-edge-type',
   'add-member', 'update-member', 'delete-member',
   'update-annotation',
+  'update-mode',
   'add-activation', 'delete-activation',
   'insert-slot',
   'add-region', 'update-region', 'delete-region',
@@ -746,6 +747,12 @@ function onBgMousedown(e) {
     return
   }
 
+  // ER select: background click switches back to Add mode
+  if (props.diagramType === 'er' && props.mode === 'select') {
+    emit('update-mode', 'add')
+    return
+  }
+
   // Sequence: add-node is handled by the sticky header; body clicks only clear state
   if (props.mode === 'add' && !isSequence.value) {
     const pt = svgPoint(e)
@@ -758,6 +765,7 @@ function onBgMousedown(e) {
 
 // Called when clicking the sticky sequence header background
 function onHeaderMousedown(e) {
+  if (editingNodeId.value !== null) return
   selectedId.value = null
   selectedEdgeId.value = null
   connectSource.value = null
@@ -790,6 +798,16 @@ function onNodeDown(e, node) {
       emit('add-edge', connectSource.value.id, node.id)
       connectSource.value = null
     }
+    return
+  }
+  // Class/ER diagram: clicking a node in Add mode switches to Select mode
+  if ((props.diagramType === 'class' || props.diagramType === 'er') && props.mode === 'add') {
+    emit('update-mode', 'select')
+    selectedId.value = node.id
+    const pt = svgPoint(e)
+    dragging = node
+    dragOffX = pt.x - node.x
+    dragOffY = pt.y - node.y
     return
   }
   if (props.mode === 'select') {
@@ -867,6 +885,9 @@ function onMouseUp() {
         n.y >= prev.y && n.y <= prev.y + prev.height
       )
       if (hasNode) emit('add-subgraph', prev.x, prev.y, prev.width, prev.height)
+    } else if (props.diagramType === 'class' && props.mode === 'select') {
+      // Class diagram: click on empty canvas (no real drag) → switch back to Add mode
+      emit('update-mode', 'add')
     }
     sgDragStart = null
     sgDragPreview.value = null
@@ -1383,6 +1404,10 @@ function onKeyDown(e) {
                   :fill="nodeColor('participant').fill" :stroke="strokeColor(node)" stroke-width="2" />
           </template>
           <template v-else-if="node.type === 'actor'">
+            <!-- invisible hit area covering head→legs+label -->
+            <rect :x="effectiveX(node) - NODE_W / 2" :y="effectiveY(node) - 28"
+                  :width="NODE_W" height="72"
+                  fill="transparent" stroke="none" />
             <circle :cx="effectiveX(node)" :cy="effectiveY(node) - 16" r="10"
                     :fill="nodeColor('actor').fill" :stroke="strokeColor(node)" stroke-width="2" />
             <line :x1="effectiveX(node)" :y1="effectiveY(node) - 6"
@@ -1431,6 +1456,9 @@ function onKeyDown(e) {
         <defs>
           <marker id="arrowHead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
             <polygon points="0 0, 10 3.5, 0 7" fill="#60a5fa" />
+          </marker>
+          <marker id="arrowHeadSel" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" />
           </marker>
           <marker id="arrowCross" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
             <line x1="0" y1="0" x2="10" y2="10" stroke="#f87171" stroke-width="2"/>

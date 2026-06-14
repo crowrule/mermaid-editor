@@ -495,8 +495,14 @@ function onLangMenuClickOutside(e) {
         <option value="class">Class Diagram</option>
       </select>
 
+      <!-- ── clear button ── -->
+      <button
+        @click="requestClear"
+        class="px-2.5 py-1 text-xs rounded bg-red-900/60 text-red-300 hover:bg-red-800 transition-colors whitespace-nowrap"
+      >✕ {{ t.clearConfirm }}</button>
+
       <!-- ── language selector ── -->
-      <div ref="langMenuRef" class="relative">
+      <div ref="langMenuRef" class="relative ml-auto">
         <button
           @click="showLangMenu = !showLangMenu"
           class="flex items-center justify-center w-8 h-8 rounded text-gray-400 hover:text-gray-200 hover:bg-gray-700 transition-colors"
@@ -579,7 +585,6 @@ function onLangMenuClickOutside(e) {
         @add-subgraph="handleAddSubgraph"
         @update-subgraph="handleUpdateSubgraph"
         @delete-subgraph="handleDeleteSubgraph"
-        @clear="requestClear"
       />
 
       <!-- Draggable divider -->
@@ -615,7 +620,7 @@ function onLangMenuClickOutside(e) {
           <!-- tab-contextual action buttons -->
           <div class="ml-auto flex items-center gap-2 pr-3">
             <template v-if="rightTab === 'preview'">
-              <ToolBar :preview-ref="previewRef" />
+              <ToolBar :preview-ref="previewRef" :code="diagramCode" />
             </template>
             <template v-else>
               <button
